@@ -1,0 +1,17 @@
+.{
+    .name = .glib2,
+    .version = "2.87.2",
+    .minimum_zig_version = "0.16.0-dev.2296+fd3657bf8",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+    .dependencies = .{
+        .glib2 = .{
+            .url = "git+https://gitlab.gnome.org/GNOME/glib#44bce2fd71fdab67ee52d0ec3db6fba96dc12215",
+            .hash = "N-V-__8AAFCEJgM-Xp3D1xS1PG3ch_lqE5kKyOh1dTFI8qKg",
+        },
+    },
+    .fingerprint = 0x44dabcf1881ea802,
+}
