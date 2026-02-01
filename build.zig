@@ -1,5 +1,9 @@
 const std = @import("std");
+const build_zon = @import("build.zig.zon");
 const builtin = @import("builtin");
+const mem = std.mem;
+
+const Step = std.Build.Step;
 
 const Buildtype = enum { debugoptimized };
 const WarnLevel = enum { @"1", @"2", @"3" };
@@ -7,21 +11,16 @@ const Cstd = enum { gnu99, c99, c11, c17, c23 }; // TODO: make c11 default and t
 const Feature = enum { enabled, disabled, auto };
 const MonitorBackend = enum { auto, inotify, kqueue, @"libinotify-kqueue", win32 };
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
-    _ = optimize; // autofix
     const target = b.standardTargetOptions(.{});
-    _ = target; // autofix
+    const rt = target.result;
 
-    const glib2 = b.dependency("glib2", .{});
-    _ = glib2; // autofix
+    const upstream = b.dependency("glib2", .{});
 
-    const default_options = b.addOptions();
-    default_options.addOption(Buildtype, "buildtype", .debugoptimized);
-    default_options.addOption(WarnLevel, "warnlevel", .@"3");
-    default_options.addOption(Cstd, "c_std", .c11);
+    const linkage = b.option(std.builtin.LinkMode, "linkage", "linkage mode for library") orelse .static;
 
-    const gio_module_dir = b.option([]const u8, "gio_module_dir", "load gio modules from this directory (default to 'libdir/gio/modules' if unset)") orelse "libdir/gio/modules";
+    const gio_module_dir = b.option([]const u8, "gio_module_dir", "load gio modules from this directory (default to '${libdir}/gio/modules' if unset)");
     const selinux = b.option(Feature, "selinux", "build with selinux support") orelse .auto;
     _ = selinux; // autofix
 
@@ -42,8 +41,8 @@ pub fn build(b: *std.Build) void {
     const documentation = b.option(bool, "documentation", "Build API reference and tools documentation") orelse false;
     const bsymbolic_functions = b.option(bool, "bsymbolic_functions", "link with -Bsymbolic-functions if supported") orelse true;
     const force_posix_threads = b.option(bool, "force_posix_threads", "Also use posix threads in case the platform defaults to another implementation (on Windows for example)") orelse false;
-    const buld_tests = b.option(bool, "tests", "build tests") orelse true;
-    _ = buld_tests; // autofix
+    const enable_tests = b.option(bool, "tests", "build tests") orelse true;
+    _ = enable_tests; // autofix
 
     const installed_tests = b.option(bool, "installed_tests", "enable installed tests") orelse false;
 
@@ -52,7 +51,6 @@ pub fn build(b: *std.Build) void {
 
     const oss_fuzz = b.option(Feature, "oss_fuzz", "Indicate oss-fuzz build environment") orelse .disabled;
     _ = oss_fuzz; // autofix
-    _ = installed_tests; // autofix
     _ = force_posix_threads; // autofix
     _ = bsymbolic_functions; // autofix
     _ = documentation; // autofix
@@ -63,10 +61,8 @@ pub fn build(b: *std.Build) void {
     _ = glib_debug; // autofix
 
     const glib_assert = b.option(bool, "glib_assert", "Enable GLib assertion (see docs/macros.md)") orelse true;
-    _ = glib_assert; // autofix
 
     const glib_checks = b.option(bool, "glib_checks", "Enable GLib checks such as API guards (see docs/macros.md)") orelse true;
-    _ = glib_checks; // autofix
 
     const libelf = b.option(Feature, "libelf", "Enable support for listing and extracting from ELF resource files with gresource tool") orelse .auto;
     _ = libelf; // autofix
@@ -77,5 +73,436 @@ pub fn build(b: *std.Build) void {
     const file_monitor_backend = b.option(MonitorBackend, "file_monitor_backend", "The name of the system API to use as a GFileMonitor backend") orelse .auto;
     _ = file_monitor_backend; // autofix
     _ = introspection; // autofix
-    _ = gio_module_dir; // autofix
+
+    const default_options = b.addOptions();
+    default_options.addOption(Buildtype, "buildtype", .debugoptimized);
+    default_options.addOption(WarnLevel, "warnlevel", .@"3");
+    default_options.addOption(Cstd, "c_std", .c11);
+
+    const glib_prefix = b.install_path;
+    const glib_bindir = b.exe_dir;
+    _ = glib_bindir; // autofix
+    const glib_libdir = b.lib_dir;
+    const includedir = b.h_dir;
+    const libexecdir = b.pathJoin(&.{ glib_libdir, "libexec" });
+    const datadir = b.pathJoin(&.{ glib_prefix, "share" });
+    const localedir = b.pathJoin(&.{ glib_prefix, "share/locale" });
+    const localstatedir = b.pathJoin(&.{ glib_prefix, "state" });
+    const glib_libexecdir = b.pathJoin(&.{ glib_prefix, libexecdir });
+    const glib_datadir = b.pathJoin(&.{ glib_prefix, datadir });
+    const glib_localedir = b.pathJoin(&.{ glib_prefix, localedir });
+    _ = glib_localedir; // autofix
+    const glib_pkgdatadir = b.pathJoin(&.{ glib_datadir, "glib-2.0" });
+    _ = glib_pkgdatadir; // autofix
+    const glib_includedir = b.pathJoin(&.{ glib_prefix, includedir, "glib-2.0" });
+    _ = glib_includedir; // autofix
+    const glib_giomodulesdir = if (gio_module_dir) |gio_modules_dir| b.pathJoin(&.{ glib_prefix, gio_modules_dir }) else b.pathJoin(&.{ glib_libdir, "gio", "modules" });
+    _ = glib_giomodulesdir; // autofix
+
+    const glib_pkgconfigreldir = b.pathJoin(&.{ glib_libdir, "pkgconfig" });
+    _ = glib_pkgconfigreldir; // autofix
+    const glib_localstatedir = b.pathJoin(&.{ glib_prefix, localstatedir });
+    _ = glib_localstatedir; // autofix
+
+    const installed_tests_metadir = b.pathJoin(&.{ glib_datadir, "installed-tests", @tagName(build_zon.name) });
+    _ = installed_tests_metadir; // autofix
+    const installed_tests_execdir = b.pathJoin(&.{ glib_libexecdir, "installed-tests", @tagName(build_zon.name) });
+    _ = installed_tests_execdir; // autofix
+    const installed_tests_enabled = installed_tests;
+    _ = installed_tests_enabled; // autofix
+    const installed_tests_template = "tests/template.test.in";
+    _ = installed_tests_template; // autofix
+    const installed_tests_template_tap = "tests/template-tap.test.in";
+    _ = installed_tests_template_tap; // autofix
+
+    var test_env: std.process.Environ.Map = .init(b.allocator);
+    defer test_env.deinit();
+
+    try test_env.put("G_DEBUG", "gc-friendly");
+    try test_env.put("G_ENABLE_DIAGNOSTIC", "1");
+    try test_env.put("MALLOC_CHECK_", "2");
+    try test_env.put("LINT_WARNINGS_ARE_ERRORS", "1");
+
+    // Don’t build the tests unless we can run them (either natively, in an exe wrapper, or by installing them for later use)
+    // const build_tests = enable_tests and (!run_test.skip_foreign_checks or installed_tests_enabled);
+
+    // Disable strict aliasing;
+    // see https://bugzilla.gnome.org/show_bug.cgi?id=791622
+    var cflags: std.ArrayList([]const u8) = try .initCapacity(b.allocator, 24);
+    cflags.appendSliceAssumeCapacity(&.{
+        "-fno-strict-aliasing",
+        "-D_XOPEN_SOURCE=800",
+        "-Wall",
+        "-Weverything",
+        "-Wextra",
+        "-Wno-c++98-compat",
+        "-Wno-declaration-after-statement",
+        "-Wno-pre-c2x-compat",
+        "-Wno-pre-c2y-compat",
+        "-Wno-switch-default",
+        "-Wno-unsafe-buffer-usage",
+        "-Wno-used-but-marked-unused",
+        "-Wno-vla",
+        "-Wno-unused-parameter",
+        "-Wno-cast-function-type",
+        // "-Wno-bad-function-cast",
+        "-Wno-format-zero-length",
+        "-Wno-variadic-macros",
+        // "-Wno-string-plus-int",
+        //  "-Wno-typedef-redefinition",
+        "-pedantic",
+        "-pedantic-errors",
+        "-std=c2y",
+    });
+    switch (optimize) {
+        .Debug => cflags.appendAssumeCapacity("-DG_ENABLE_DEBUG"),
+        else => cflags.appendAssumeCapacity("-DG_DISABLE_CAST_CHECKS"),
+    }
+
+    switch (rt.os.tag) {
+        .linux => cflags.appendAssumeCapacity("-D_GNU_SOURCE"),
+        .windows => cflags.appendSliceAssumeCapacity(&.{ "-DUNICODE", "-D_UNICODE", "-mms-bitfields" }),
+        else => {},
+    }
+    if (!glib_assert) cflags.appendAssumeCapacity("-DG_DISABLE_ASSERT");
+    if (!glib_checks) cflags.appendAssumeCapacity("-DG_DISABLE_CHECKS");
+
+    // Versioning
+    const version: std.SemanticVersion = try .parse(build_zon.version);
+    const major_version = version.major;
+    const minor_version = version.minor;
+    const micro_version = version.patch;
+
+    const interface_age = if (minor_version % 2 != 0) 0 else micro_version;
+    const binary_age = 100 * minor_version + micro_version;
+    const soversion = 0;
+    const current = binary_age - interface_age;
+    const library_version: std.SemanticVersion = .{ .major = soversion, .minor = current, .patch = interface_age };
+
+    const glibconfig_conf = b.addConfigHeader(.{
+        .style = .{
+            .cmake = upstream.path("glib/glibconfig.h.in"),
+        },
+        .include_path = "glib/glibconfig.h",
+    }, .{
+        // used by the .rc.in files
+        .LT_CURRENT_MINUS_AGE = soversion,
+        .glib_os = switch (rt.os.tag) {
+            .windows =>
+            \\\#define G_OS_WIN32
+            \\\#define G_PLATFORM_WIN32
+            \\\
+            ,
+            .linux => "#define G_OS_UNIX",
+            else => unreachable,
+        },
+    });
+
+    switch (linkage) {
+        .static => glibconfig_conf.addValues(.{
+            .GLIB_STATIC_COMPILATION = 1,
+            .GOBJECT_STATIC_COMPILATION = 1,
+            .GIO_STATIC_COMPILATION = 1,
+            .GMODULE_STATIC_COMPILATION = 1,
+            .GI_STATIC_COMPILATION = 1,
+            .G_INTL_STATIC_COMPILATION = 1,
+            .FFI_STATIC_BUILD = 1,
+        }),
+        else => {},
+    }
+
+    const glib_conf = b.addConfigHeader(.{
+        .style = .blank,
+        .include_path = "glib/config.h",
+    }, .{
+        .GLIB_MAJOR_VERSION = int64(major_version),
+        .GLIB_MINOR_VERSION = int64(minor_version),
+        .GLIB_MICRO_VERSION = int64(micro_version),
+        .GLIB_INTERFACE_AGE = int64(interface_age),
+        .GLIB_BINARY_AGE = int64(binary_age),
+        .GETTEXT_PACKAGE = "glib20",
+        .PACKAGE_BUGREPORT = "https://github.com/bernardassan/Glib/issues/new",
+        .PACKAGE_NAME = "glib",
+        .PACKAGE_STRING = b.fmt("glib {s}", .{build_zon.version}),
+        .PACKAGE_TARNAME = "glib",
+        .PACKAGE_URL = "",
+        .PACKAGE_VERSION = build_zon.version,
+        .ENABLE_NLS = 1,
+        ._GNU_SOURCE = 1,
+        // Poll doesn't work on devices on Windows, and macOS's poll() implementation is known to be broken
+        .BROKEN_POLL = switch (rt.os.tag) {
+            .macos, .windows => true,
+            else => false,
+        },
+        ._FILE_OFFSET_BITS = 64,
+    });
+    //  check for header files
+    platformHeadersConfig(glib_conf, b, &rt);
+    if (glib_conf.values.contains("HAVE_LINUX_NETLINK_H") or
+        glib_conf.values.contains("HAVE_NETLINK_NETLINK_H") or
+        glib_conf.values.contains("HAVE_NETLINK_NETLINK_ROUTE_H")) glib_conf.addValue("HAVE_NETLINK", u32, 1);
+
+    // TODO: improve feature detection to actually be able to tell support
+    // without compiling code
+    if (!rt.isBionicLibC()) glib_conf.addValue("HAVE_STATX", u32, 1);
+    if (rt.os.tag != .windows) glib_conf.addValue("HAVE_LC_MESSAGES", u32, 1);
+    if (rt.isGnuLibC() or rt.isDarwinLibC() or rt.isFreeBSDLibC() or rt.isNetBSDLibC() or rt.isOpenBSDLibC()) glib_conf.addValue("HAVE_STRUCT_STAT_ST_MTIMENSEC", u32, 1);
+
+    const glib_mod = b.createModule(.{
+        .link_libc = true,
+        .optimize = optimize,
+        .target = target,
+    });
+    glib_mod.addIncludePath(upstream.path("."));
+    glib_mod.addIncludePath(upstream.path("glib"));
+    glib_mod.addIncludePath(upstream.path("gobject"));
+    glib_mod.addIncludePath(upstream.path("gmodule"));
+    glib_mod.addIncludePath(upstream.path("gio"));
+    glib_mod.addIncludePath(upstream.path("girepository"));
+    glib_mod.addConfigHeader(glib_conf);
+    glib_mod.addConfigHeader(glibconfig_conf);
+    const glib = b.addLibrary(.{
+        .name = "glib-2.0",
+        .root_module = glib_mod,
+        .linkage = linkage,
+        .max_rss = 1024 * 1024,
+        .version = library_version,
+    });
+    _ = glib; // autofix
+
+    // TODO: install library and include directories
 }
+
+fn platformHeadersConfig(glib_conf: *Step.ConfigHeader, b: *std.Build, rt: *const std.Target) void {
+    for (headers.all_platforms) |header| {
+        const define = headers.toDefine(b, header);
+        glib_conf.addValue(define, u32, 1);
+    }
+    for (headers.no_platform) |header| {
+        const define = headers.toDefine(b, header);
+        glib_conf.addValue(define, u32, 0);
+    }
+    if (rt.os.tag == .linux) for (headers.linux) |header| {
+        const define = headers.toDefine(b, header);
+        glib_conf.addValue(define, u32, 0);
+    };
+    if (rt.os.tag != .windows) for (headers.unix) |header| {
+        const define = headers.toDefine(b, header);
+        glib_conf.addValue(define, u32, 0);
+    };
+    if (rt.isMinGW()) for (headers.mingw) |header| {
+        const define = headers.toDefine(b, header);
+        glib_conf.addValue(define, u32, 1);
+    };
+    if (rt.isMuslLibC() or rt.isGnuLibC()) for (headers.musl_glibc) |header| {
+        const define = headers.toDefine(b, header);
+        glib_conf.addValue(define, u32, 1);
+    };
+    if (rt.isMuslLibC() or rt.isGnuLibC() or rt.isFreeBSDLibC() or rt.isOpenBSDLibC())
+        for (headers.musl_glibc_free_open_bsd) |header| {
+            const define = headers.toDefine(b, header);
+            glib_conf.addValue(define, u32, 1);
+        };
+    if (rt.isMuslLibC() or rt.isGnuLibC() or rt.isFreeBSDLibC())
+        for (headers.musl_glibc_freebsd) |header| {
+            const define = headers.toDefine(b, header);
+            glib_conf.addValue(define, u32, 1);
+        };
+    if (rt.isDarwinLibC()) for (headers.darwin) |header| {
+        const define = headers.toDefine(b, header);
+        glib_conf.addValue(define, u32, 1);
+    };
+    if (rt.isDarwinLibC() or rt.isFreeBSDLibC() or rt.isNetBSDLibC() or
+        rt.isOpenBSDLibC())
+        for (headers.darwin_all_bsd) |header| {
+            const define = headers.toDefine(b, header);
+            glib_conf.addValue(define, u32, 1);
+        };
+    if (rt.isDarwinLibC() or rt.isFreeBSDLibC()) for (headers.darwin_freebsd) |header| {
+        const define = headers.toDefine(b, header);
+        glib_conf.addValue(define, u32, 1);
+    };
+    if (rt.isGnuLibC() or rt.isFreeBSDLibC() or rt.isNetBSDLibC() or
+        rt.isOpenBSDLibC())
+        for (headers.glibc_all_bsd) |header| {
+            const define = headers.toDefine(b, header);
+            glib_conf.addValue(define, u32, 1);
+        };
+    if (rt.isFreeBSDLibC()) for (headers.freebsd) |header| {
+        const define = headers.toDefine(b, header);
+        glib_conf.addValue(define, u32, 1);
+    };
+}
+
+fn int64(value: anytype) i64 {
+    return @intCast(value);
+}
+
+// The segregation of headers was done by manually checking for them in
+// Zig's /lib/libc folder
+const headers = struct {
+    /// underscorify and to_upper
+    fn toDefine(b: *std.Build, header: []const u8) []const u8 {
+        const macro = b.fmt("HAVE_{s}", .{header});
+        mem.replaceScalar(u8, macro, '.', '_');
+        mem.replaceScalar(u8, macro, '/', '_');
+        return std.ascii.upperString(macro, macro);
+    }
+    // musl, glibc, darwin, netbsd, freebsd, openbsd
+    const unix: []const []const u8 = &.{
+        "alloca.h",
+        "grp.h",
+        "poll.h",
+        "pwd.h",
+        "spawn.h",
+        "sys/uio.h",
+        "sys/mount.h",
+        "sys/resource.h",
+        "sys/select.h",
+        "sys/statvfs.h",
+        "sys/times.h",
+        "sys/wait.h",
+        "syslog.h",
+        "termios.h",
+    };
+
+    const mingw: []const []const u8 = &.{
+        "afunix.h",
+        "intsafe.h",
+    };
+
+    const darwin: []const []const u8 = &.{
+        "crt_externs.h",
+        "libproc.h",
+        "mach/mach_time.h",
+    };
+
+    const glibc_all_bsd: []const []const u8 = &.{
+        "fstab.h",
+    };
+
+    const linux: []const []const u8 = &.{
+        "linux/netlink.h",
+    };
+
+    const musl_glibc: []const []const u8 = &.{
+        "mntent.h",
+        "sys/statfs.h",
+        "sys/vfs.h",
+        "values.h",
+    };
+
+    const freebsd: []const []const u8 = &.{
+        "netlink/netlink.h",
+        "netlink/netlink_route.h",
+        // Double check these
+        "stdatomic.h",
+        "stdckdint.h",
+    };
+
+    const musl_glibc_free_open_bsd: []const []const u8 = &.{
+        "sys/auxv.h",
+    };
+
+    const musl_glibc_freebsd: []const []const u8 = &.{
+        "sys/inotify.h",
+        "sys/prctl.h",
+    };
+
+    const darwin_all_bsd: []const []const u8 = &.{
+        "sys/event.h",
+        "sys/filio.h",
+        "sys/sysctl.h",
+        "sys/ucred.h",
+    };
+
+    const darwin_freebsd: []const []const u8 = &.{
+        "xlocale.h",
+    };
+
+    // no Zig platform currently has these headers
+    const no_platform: []const []const u8 = &.{
+        "sys/mkdev.h",
+        "sys/mntctl.h",
+        "sys/mnttab.h",
+        "sys/vfstab.h",
+        "sys/vmount.h",
+    };
+
+    const all_platforms: []const []const u8 = &.{
+        "dirent.h",
+        "float.h",
+        "ftw.h",
+        "inttypes.h",
+        "limits.h",
+        "locale.h",
+        "memory.h",
+        "sched.h",
+        "stdint.h",
+        "stdlib.h",
+        "string.h",
+        "strings.h",
+        "sys/param.h",
+        "sys/stat.h",
+        "sys/time.h",
+        "sys/types.h",
+        "unistd.h",
+        "wchar.h",
+        "malloc.h",
+    };
+};
+const struct_members = struct {
+    const glibc_darwin_all_bsd: []const []const u8 = &.{
+        "stat_st_mtimensec",
+        "stat_st_atimensec",
+        "stat_st_ctimensec",
+    };
+
+    // the glib support is on only few architectures
+    // TODO: verify the glibc support for stat
+    const musl_glibc_all_bsd: []const []const u8 = &.{
+        "stat_st_mtim.tv_nsec",
+        "stat_st_atim.tv_nsec",
+        "stat_st_ctim.tv_nsec",
+    };
+
+    const musl_glibc_darwin_free_open_bsd: []const []const u8 = &.{
+        "statfs_f_bavail",
+    };
+
+    const musl_glibc_darwin_all_bsd: []const []const u8 = &.{
+        "dirent_d_type",
+        "tm_tm_gmtoff",
+    };
+
+    const unix: []const []const u8 = &.{
+        "stat_st_blksize",
+        "stat_st_blocks",
+    };
+
+    const musl_glibc: []const []const u8 = &.{
+        "stat_st_blksize",
+        "stat_st_blocks",
+        "statvfs_f_type",
+        "tm___tm_gmtoff",
+    };
+
+    const darwin_all_bsd: []const []const u8 = &.{
+        "stat_st_birthtime",
+        "stat_st_birthtimensec",
+    };
+
+    const all_bsd: []const []const u8 = &.{
+        "stat_st_birthtim",
+    };
+
+    const free_open_bsd: []const []const u8 = &.{
+        "stat_st_birthtim.tv_nsec",
+    };
+
+    const no_platform: []const []const u8 = &.{
+        "statfs_f_fstypename",
+        "statvfs_f_basetype",
+        "statvfs_f_fstypename",
+    };
+};
