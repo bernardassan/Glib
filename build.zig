@@ -52,7 +52,6 @@ pub fn build(b: *std.Build) !void {
     const oss_fuzz = b.option(Feature, "oss_fuzz", "Indicate oss-fuzz build environment") orelse .disabled;
     _ = oss_fuzz; // autofix
     _ = force_posix_threads; // autofix
-    _ = bsymbolic_functions; // autofix
     _ = documentation; // autofix
     _ = sysprof; // autofix
     _ = tapset_install_dir; // autofix
@@ -153,7 +152,17 @@ pub fn build(b: *std.Build) !void {
         "-pedantic",
         "-pedantic-errors",
         "-std=c2y",
+        // Prevents the library(.so) from being unloaded from memory. Meaning
+        // It would remains in the process's address space even when dlclose()
+        // is called
+        "-Wl,-z,nodelete",
     });
+
+    // Bind references to global functions to within the library itself to make
+    // function calls faster because the dynamic linker doesn't have to resolve
+    // symbol at runtime via the Procedure Linkage Table (PLT)
+    if (bsymbolic_functions) cflags.appendAssumeCapacity("-Wl,-Bsymbolic-functions");
+
     switch (optimize) {
         .Debug => cflags.appendAssumeCapacity("-DG_ENABLE_DEBUG"),
         else => cflags.appendAssumeCapacity("-DG_DISABLE_CAST_CHECKS"),
@@ -235,6 +244,11 @@ pub fn build(b: *std.Build) !void {
             else => false,
         },
         ._FILE_OFFSET_BITS = 64,
+        // the Zig Mingw windows target is not UWP compatible
+        ._WIN32_WINNT = switch (rt.os.tag) {
+            .windows => "0x0601",
+            else => null,
+        },
     });
     //  check for header files
     platformHeadersConfig(glib_conf, b, &rt);
@@ -246,7 +260,8 @@ pub fn build(b: *std.Build) !void {
     // without compiling code
     if (!rt.isBionicLibC()) glib_conf.addValue("HAVE_STATX", u32, 1);
     if (rt.os.tag != .windows) glib_conf.addValue("HAVE_LC_MESSAGES", u32, 1);
-    if (rt.isGnuLibC() or rt.isDarwinLibC() or rt.isFreeBSDLibC() or rt.isNetBSDLibC() or rt.isOpenBSDLibC()) glib_conf.addValue("HAVE_STRUCT_STAT_ST_MTIMENSEC", u32, 1);
+    //  check for struct members in libc
+    platformStructMembersConfig(glib_conf, b, &rt);
 
     const glib_mod = b.createModule(.{
         .link_libc = true,
@@ -280,15 +295,15 @@ fn platformHeadersConfig(glib_conf: *Step.ConfigHeader, b: *std.Build, rt: *cons
     }
     for (headers.no_platform) |header| {
         const define = headers.toDefine(b, header);
-        glib_conf.addValue(define, u32, 0);
+        glib_conf.addValue(define, @TypeOf(null), null);
     }
     if (rt.os.tag == .linux) for (headers.linux) |header| {
         const define = headers.toDefine(b, header);
-        glib_conf.addValue(define, u32, 0);
+        glib_conf.addValue(define, u32, 1);
     };
     if (rt.os.tag != .windows) for (headers.unix) |header| {
         const define = headers.toDefine(b, header);
-        glib_conf.addValue(define, u32, 0);
+        glib_conf.addValue(define, u32, 1);
     };
     if (rt.isMinGW()) for (headers.mingw) |header| {
         const define = headers.toDefine(b, header);
@@ -330,6 +345,58 @@ fn platformHeadersConfig(glib_conf: *Step.ConfigHeader, b: *std.Build, rt: *cons
         };
     if (rt.isFreeBSDLibC()) for (headers.freebsd) |header| {
         const define = headers.toDefine(b, header);
+        glib_conf.addValue(define, u32, 1);
+    };
+}
+
+fn platformStructMembersConfig(glib_conf: *Step.ConfigHeader, b: *std.Build, rt: *const std.Target) void {
+    for (struct_members.no_platform) |member| {
+        const define = struct_members.toDefine(b, member);
+        glib_conf.addValue(define, @TypeOf(null), null);
+    }
+    if (rt.os.tag != .windows) for (struct_members.unix) |member| {
+        const define = struct_members.toDefine(b, member);
+        glib_conf.addValue(define, u32, 1);
+    };
+    if (rt.isDarwinLibC() or rt.isFreeBSDLibC() or rt.isNetBSDLibC()) for (struct_members.darwin_free_net_bsd) |member| {
+        const define = struct_members.toDefine(b, member);
+        glib_conf.addValue(define, u32, 1);
+    };
+    if (rt.isDarwinLibC() or rt.isFreeBSDLibC() or rt.isOpenBSDLibC()) for (struct_members.darwin_free_open_bsd) |member| {
+        const define = struct_members.toDefine(b, member);
+        glib_conf.addValue(define, u32, 1);
+    };
+    if (rt.isFreeBSDLibC()) for (struct_members.free_bsd) |member| {
+        const define = struct_members.toDefine(b, member);
+        glib_conf.addValue(define, u32, 1);
+    };
+    if (rt.isFreeBSDLibC() or rt.isNetBSDLibC()) for (struct_members.free_net_bsd) |member| {
+        const define = struct_members.toDefine(b, member);
+        glib_conf.addValue(define, u32, 1);
+    };
+    if (rt.isGnuLibC() or rt.isDarwinLibC() or rt.isFreeBSDLibC() or rt.isOpenBSDLibC() or rt.isNetBSDLibC()) for (struct_members.glibc_darwin_all_bsd) |member| {
+        const define = struct_members.toDefine(b, member);
+        glib_conf.addValue(define, u32, 1);
+    };
+    if (rt.isMuslLibC() or rt.isGnuLibC()) for (struct_members.musl_glibc) |member| {
+        const define = struct_members.toDefine(b, member);
+        glib_conf.addValue(define, u32, 1);
+    };
+    if (rt.isMuslLibC() or rt.isGnuLibC() or rt.isNetBSDLibC() or rt.isOpenBSDLibC() or rt.isFreeBSDLibC()) for (struct_members.musl_glibc_all_bsd) |member| {
+        const define = struct_members.toDefine(b, member);
+        glib_conf.addValue(define, u32, 1);
+    };
+    if (rt.isMuslLibC() or rt.isGnuLibC() or rt.isDarwinLibC() or rt.isNetBSDLibC() or rt.isOpenBSDLibC() or rt.isFreeBSDLibC())
+        for (struct_members.musl_glibc_darwin_all_bsd) |member| {
+            const define = struct_members.toDefine(b, member);
+            glib_conf.addValue(define, u32, 1);
+        };
+    if (rt.isMuslLibC() or rt.isGnuLibC() or rt.isDarwinLibC() or rt.isFreeBSDLibC() or rt.isOpenBSDLibC()) for (struct_members.musl_glibc_darwin_free_open_bsd) |member| {
+        const define = struct_members.toDefine(b, member);
+        glib_conf.addValue(define, u32, 1);
+    };
+    if (rt.isNetBSDLibC()) for (struct_members.net_bsd) |member| {
+        const define = struct_members.toDefine(b, member);
         glib_conf.addValue(define, u32, 1);
     };
 }
@@ -451,7 +518,15 @@ const headers = struct {
         "malloc.h",
     };
 };
+
 const struct_members = struct {
+    /// underscorify and to_upper
+    fn toDefine(b: *std.Build, member: []const u8) []const u8 {
+        const macro = b.fmt("HAVE_STRUCT_{s}", .{member});
+        mem.replaceScalar(u8, macro, '.', '_');
+        return std.ascii.upperString(macro, macro);
+    }
+
     const glibc_darwin_all_bsd: []const []const u8 = &.{
         "stat_st_mtimensec",
         "stat_st_atimensec",
@@ -481,28 +556,33 @@ const struct_members = struct {
     };
 
     const musl_glibc: []const []const u8 = &.{
-        "stat_st_blksize",
-        "stat_st_blocks",
         "statvfs_f_type",
         "tm___tm_gmtoff",
     };
 
-    const darwin_all_bsd: []const []const u8 = &.{
-        "stat_st_birthtime",
-        "stat_st_birthtimensec",
+    // TODO: test darwin and free_bsd members as I'm not too sure
+    const darwin_free_net_bsd: []const []const u8 = &.{
+        "stat_st_birthtime", // open bsd uses __st_birthtime
+        "stat_st_birthtimensec", // open has __st_bi*
     };
 
-    const all_bsd: []const []const u8 = &.{
-        "stat_st_birthtim",
+    const darwin_free_open_bsd: []const []const u8 = &.{
+        "statfs_f_fstypename",
     };
 
-    const free_open_bsd: []const []const u8 = &.{
-        "stat_st_birthtim.tv_nsec",
+    const free_net_bsd: []const []const u8 = &.{
+        "stat_st_birthtim", // openbsd uses __st_b*
+    };
+
+    const free_bsd: []const []const u8 = &.{
+        "stat_st_birthtim.tv_nsec", // openbsd uses __st_b*
+    };
+
+    const net_bsd: []const []const u8 = &.{
+        "statvfs_f_fstypename",
     };
 
     const no_platform: []const []const u8 = &.{
-        "statfs_f_fstypename",
         "statvfs_f_basetype",
-        "statvfs_f_fstypename",
     };
 };
