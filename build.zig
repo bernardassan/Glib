@@ -455,6 +455,7 @@ const headers = struct {
     const musl_glibc: []const []const u8 = &.{
         "mntent.h",
         "sys/statfs.h",
+        "sys/prctl.h",
         "sys/vfs.h",
         "values.h",
     };
@@ -473,7 +474,6 @@ const headers = struct {
 
     const musl_glibc_freebsd: []const []const u8 = &.{
         "sys/inotify.h",
-        "sys/prctl.h",
     };
 
     const darwin_all_bsd: []const []const u8 = &.{
@@ -584,5 +584,145 @@ const struct_members = struct {
 
     const no_platform: []const []const u8 = &.{
         "statvfs_f_basetype",
+    };
+};
+
+const functions = struct {
+    const unix: []const []const u8 = &.{
+        "statvfs",
+        "faccessat",
+        "fchmod",
+        "fchown",
+        "getifaddrs",
+        "lchown",
+        "memmem",
+        "mmap",
+        "newlocale",
+        "poll",
+        "readlink",
+        "setenv",
+        "strnlen",
+        "strsignal",
+        "timegm",
+        "unsetenv",
+        "utimes",
+        "utimensat",
+        "valloc",
+    };
+
+    const musl_glibc: []const []const u8 = &.{
+        "splice",
+        "sysinfo",
+        "prctl",
+        "endmntent",
+        "epoll_create1",
+        "fallocate",
+        "getauxval",
+        "getmntent_r",
+        "hasmntopt",
+        "prlimit",
+    };
+
+    const musl_glibc_freebsd: []const []const u8 = &.{
+        "copy_file_range",
+        "inotify_init1",
+        "memalign",
+    };
+
+    const musl_glibc_darwin_free_openbsd: []const []const u8 = &.{
+        "statfs",
+        "uselocale",
+    };
+
+    const musl_glibc_darwin_free_netbsd: []const []const u8 = &.{
+        "lchmod",
+        "strtod_l",
+    };
+
+    const musl_glibc_all_bsd: []const []const u8 = &.{
+        "accept4",
+        "pipe2",
+        "recvmmsg",
+        "sendmmsg",
+    };
+
+    const musl_glibc_free_openbsd: []const []const u8 = &.{
+        "getresuid",
+    };
+
+    const musl_darwin_all_bsd: []const []const u8 = &.{
+        "issetugid",
+    };
+
+    const darwin: []const []const u8 = &.{
+        "_NSGetEnviron",
+    };
+
+    const darwin_free_openbsd: []const []const u8 = &.{
+        "getfsstat",
+    };
+
+    const darwin_free_netbsd: []const []const u8 = &.{
+        "sysctlbyname",
+    };
+
+    const darwin_all_bsd: []const []const u8 = &.{
+        "kevent",
+        "kqueue",
+    };
+
+    const glibc: []const []const u8 = &.{
+        "free_aligned_sized",
+        "free_sized",
+    };
+
+    const glibc_all_bsd: []const []const u8 = &.{
+        "getfsent",
+    };
+
+    const glibc_darwin_free_netbsd: []const []const u8 = &.{
+        "strtoll_l",
+        "strtoull_l",
+    };
+
+    const glibc_freebsd: []const []const u8 = &.{
+        "close_range",
+    };
+
+    const glibc_mingw: []const []const u8 = &.{
+        "ftruncate64",
+    };
+
+    const netbsd: []const []const u8 = &.{
+        "getvfsstat",
+    };
+
+    const no_platform: []const []const u8 = &.{
+        "fdwalk",
+        "setmntent",
+    };
+
+    // musl, glibc, darwin, mingw, freebsd, netbsd and openbsd
+    const all_platforms: []const []const u8 = &.{
+        "if_nametoindex",
+        "if_indextoname",
+        "endservent",
+        "fsync",
+        "getc_unlocked",
+        "getgrgid_r",
+        "getpwnam_r",
+        "getpwuid_r",
+        "gmtime_r",
+        "link",
+        "localtime_r",
+        "lstat",
+        "mbrtowc",
+        "strerror_r",
+        "symlink",
+        "vasprintf",
+        "vsnprintf",
+        "wcrtomb",
+        "wcslen",
+        "wcsnlen",
     };
 };
