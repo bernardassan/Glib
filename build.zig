@@ -77,6 +77,7 @@ pub fn build(b: *std.Build) !void {
     default_options.addOption(Buildtype, "buildtype", .debugoptimized);
     default_options.addOption(WarnLevel, "warnlevel", .@"3");
     default_options.addOption(Cstd, "c_std", .c11);
+    default_options.addOption(bool, "have_dlopen_dlsym", rt.os.tag != .windows);
 
     const glib_prefix = b.install_path;
     const glib_bindir = b.exe_dir;
@@ -205,6 +206,7 @@ pub fn build(b: *std.Build) !void {
             .linux => "#define G_OS_UNIX",
             else => unreachable,
         },
+        .G_HAVE_FREE_SIZED = if (rt.isGnuLibC()) true else null,
     });
 
     switch (linkage) {
@@ -249,7 +251,26 @@ pub fn build(b: *std.Build) !void {
             .windows => "0x0601",
             else => null,
         },
+        .MAJOR_IN_TYPES = if (rt.isDarwinLibC() or rt.isNetBSDLibC() or rt.isFreeBSDLibC() or rt.isOpenBSDLibC()) true else null,
+        // the clang bundled with Zig version `build_zon.minimum_zig_version`
+        // supports __uint128_t
+        .HAVE_UINT128_T = true,
     });
+
+    if (rt.isGnuLibC()) glib_conf.addValues(.{
+        .STRERROR_R_CHAR_P = true,
+        .HAVE_LOFF_T = true,
+    });
+    if (rt.isGnuLibC() or rt.isMuslLibC()) glib_conf.addValues(.{
+        .MAJOR_IN_SYSMACROS = true,
+        .HAVE_UNSHARE = true,
+    });
+    // on platforms where `statfs.f_bavail` exist use the `statfs` syscall
+    // directly as seen in  `struct_members.musl_glibc_darwin_free_open_bsd`
+    if (rt.isMuslLibC() or rt.isGnuLibC() or rt.isDarwinLibC() or rt.isFreeBSDLibC() or rt.isOpenBSDLibC()) glib_conf.addValues(.{
+        .USE_STATFS = true,
+    });
+
     //  check for header files
     platformHeadersConfig(glib_conf, b, &rt);
     if (glib_conf.values.contains("HAVE_LINUX_NETLINK_H") or
@@ -262,6 +283,22 @@ pub fn build(b: *std.Build) !void {
     if (rt.os.tag != .windows) glib_conf.addValue("HAVE_LC_MESSAGES", u32, 1);
     //  check for struct members in libc
     platformStructMembersConfig(glib_conf, b, &rt);
+
+    switch (builtin.os.tag) {
+        // TODO: handle compiling with -framework Foundation and AppKit
+        // and this requires objectivec
+        .macos => glib_conf.addValues(.{
+            // .HAVE_CARBON = true,
+            // .HAVE_COCOA = true,
+        }),
+        .linux => glib_conf.addValues(.{
+            .HAVE_FUTEX = true,
+        }),
+        else => {},
+    }
+    if (rt.os.tag == .linux and rt.ptrBitWidth() == 32) glib_conf.addValues(.{
+        .HAVE_FUTEX_TIME64 = true,
+    });
 
     const glib_mod = b.createModule(.{
         .link_libc = true,
@@ -588,6 +625,16 @@ const struct_members = struct {
 };
 
 const functions = struct {
+    /// to_upper
+    fn toDefine(b: *std.Build, function: []const u8) []const u8 {
+        const macro = b.fmt("HAVE_{s}", .{function});
+        return std.ascii.upperString(macro, macro);
+    }
+
+    const mingw: []const []const u8 = &.{
+        "_aligned_malloc",
+    };
+
     const unix: []const []const u8 = &.{
         "statvfs",
         "faccessat",
@@ -608,6 +655,15 @@ const functions = struct {
         "utimes",
         "utimensat",
         "valloc",
+        "stpcpy",
+        "aligned_alloc",
+        "posix_memalign",
+        "RTLD_LAZY", // RTLD_LAZY symbol in dlfcn.h
+        "RTLD_NOW",
+        "RTLD_GLOBAL",
+        "RTLD_NEXT",
+        "mkostemp",
+        "clock_gettime",
     };
 
     const musl_glibc: []const []const u8 = &.{
@@ -621,12 +677,14 @@ const functions = struct {
         "getmntent_r",
         "hasmntopt",
         "prlimit",
+        "pidfd", // pidfd_open(2) system call
     };
 
     const musl_glibc_freebsd: []const []const u8 = &.{
         "copy_file_range",
         "inotify_init1",
         "memalign",
+        "getservbyname_r", // openbsd's getservbyname_r signature is different
     };
 
     const musl_glibc_darwin_free_openbsd: []const []const u8 = &.{
@@ -644,10 +702,15 @@ const functions = struct {
         "pipe2",
         "recvmmsg",
         "sendmmsg",
+        "ppoll",
     };
 
     const musl_glibc_free_openbsd: []const []const u8 = &.{
         "getresuid",
+    };
+
+    const musl_glibc_free_netbsd: []const []const u8 = &.{
+        "eventfd", // eventfd in sys/eventfd.h
     };
 
     const musl_darwin_all_bsd: []const []const u8 = &.{
@@ -724,5 +787,9 @@ const functions = struct {
         "wcrtomb",
         "wcslen",
         "wcsnlen",
+        "posix_spawn",
+        "snprintf",
+        "strcasecmp",
+        "strncasecmp",
     };
 };
