@@ -2,19 +2,31 @@ const std = @import("std");
 const build_zon = @import("build.zig.zon");
 const builtin = @import("builtin");
 const mem = std.mem;
+const debug = std.debug;
 
 const Step = std.Build.Step;
 
 const Buildtype = enum { debugoptimized };
 const WarnLevel = enum { @"1", @"2", @"3" };
-const Cstd = enum { gnu99, c99, c11, c17, c23 }; // TODO: make c11 default and try higer versions to see if they compile
+// TODO: make c11 default and try higer versions to see if they compile
+const Cstd = enum { gnu99, c99, c11, c17, c23 };
 const Feature = enum { enabled, disabled, auto };
 const MonitorBackend = enum { auto, inotify, kqueue, @"libinotify-kqueue", win32 };
 
+// TODO: verify all quoted configs are quoted as necessary
 pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
     const target = b.standardTargetOptions(.{});
     const rt = target.result;
+
+    switch (rt.os.tag) {
+        .windows, .macos, .linux, .freebsd, .netbsd, .openbsd => {},
+        else => @panic("Os not supported. Contributions are welcome"),
+    }
+
+    // we only support systems where short is 2 bytes and int 4 bytes
+    debug.assert(rt.cTypeByteSize(.short) == 2);
+    debug.assert(rt.cTypeByteSize(.int) == 4);
 
     const upstream = b.dependency("glib2", .{});
 
@@ -195,6 +207,10 @@ pub fn build(b: *std.Build) !void {
         },
         .include_path = "glib/glibconfig.h",
     }, .{
+        .GLIB_MAJOR_VERSION = int64(major_version),
+        .GLIB_MINOR_VERSION = int64(minor_version),
+        .GLIB_MICRO_VERSION = int64(micro_version),
+        .GLIB_VERSION = build_zon.version,
         // used by the .rc.in files
         .LT_CURRENT_MINUS_AGE = soversion,
         .glib_os = switch (rt.os.tag) {
@@ -204,10 +220,131 @@ pub fn build(b: *std.Build) !void {
             \\\
             ,
             .linux => "#define G_OS_UNIX",
-            else => unreachable,
+            else => null,
         },
         .G_HAVE_FREE_SIZED = if (rt.isGnuLibC()) true else null,
+        .gint16 = .short,
+        .gint16_modifier = "h",
+        .gint16_format = "hi",
+        .guint16_format = "hu",
+        .gint32 = .int,
+        .gint32_modifier = "",
+        .gint32_format = "i",
+        .guint32_format = "u",
+        .gintbits = rt.cTypeBitSize(.int),
+        .glongbits = rt.cTypeBitSize(.long),
+        .gsizebits = rt.ptrBitWidth(),
+        .gssizebits = rt.ptrBitWidth(),
+        .g_module_suffix = if (rt.isMinGW()) "dll" else "so",
+        .glib_void_p = rt.ptrBitWidth() / 8,
+        .glib_long = rt.cTypeByteSize(.long),
+        .glib_size_t = rt.ptrBitWidth() / 8,
+        .glib_ssize_t = rt.ptrBitWidth() / 8,
+        .GLIB_HAVE_ALLOCA_H = if (!rt.isMinGW()) true else false,
+        .GLIB_HAVE_SYS_POLL_H = if (!rt.isMinGW()) true else false,
+        // Unix has these poll values and it windows builds uses same for abi
+        // compatibility due to historical bug
+        .g_pollin = 1,
+        .g_pollpri = 2,
+        .g_pollout = 4,
+        .g_pollerr = 8,
+        .g_pollhup = 16,
+        .g_pollnval = 32,
+        // Inet defines
+        .g_af_unix = 1,
+        .g_af_inet = 2,
+        .g_af_inet6 = if (rt.isGnuLibC() or rt.isMuslLibC()) int64(10) else if (rt.isDarwinLibC()) int64(30) else if (rt.isMinGW()) int64(23) else if (rt.isNetBSDLibC() or rt.isOpenBSDLibC()) int64(24) else if (rt.isFreeBSDLibC()) 28 else unreachable,
+        .g_msg_oob = 1,
+        .g_msg_peek = 2,
+        .g_msg_dontroute = 4,
+        .HAVE_IPV6 = true,
+        ._GLIB_GCC_HAVE_SYNC_SWAP = true,
+        .G_ATOMIC_LOCK_FREE = true,
+        // support only systems where stack grows downward
+        .G_HAVE_GROWING_STACK = false,
     });
+
+    switch (rt.cpu.arch.endian()) {
+        .little => glibconfig_conf.addValues(.{
+            .g_byte_order = "G_LITTLE_ENDIAN",
+            .g_bs_native = "LE",
+            .g_bs_alien = "BE",
+        }),
+        .big => glibconfig_conf.addValues(.{
+            .g_byte_order = "G_BIG_ENDIAN",
+            .g_bs_native = "BE",
+            .g_bs_alien = "LE",
+        }),
+    }
+
+    if (rt.cTypeByteSize(.long) == 8)
+        glibconfig_conf.addValues(.{
+            .gint64 = "long",
+            .glib_extension = "",
+            .gint64_modifier = "l",
+            .gint64_format = "li",
+            .guint64_format = "lu",
+            .gint64_constant = "(val##L)",
+            .guint64_constant = "(val##UL)",
+        })
+    else
+        glibconfig_conf.addValues(.{
+            .gint64 = "long long",
+            .glib_extension = .G_GNUC_EXTENSION,
+            .gint64_modifier = "ll",
+            .gint64_format = "lli",
+            .guint64_format = "llu",
+            .gint64_constant = "(G_GNUC_EXTENSION (val##LL))",
+            .guint64_constant = "(G_GNUC_EXTENSION (val##ULL))",
+        });
+
+    switch (rt.os.tag) {
+        .windows => {
+            glibconfig_conf.addValues(.{
+                .g_pid_type = "void*",
+                .g_pid_format = "p",
+                .g_dir_separator = "\\\\",
+                .g_searchpath_separator = ";",
+                .glib_size_type_define = "long long",
+                .gsize_modifier = "ll",
+                .gssize_modifier = "ll",
+                .gsize_format = "llu",
+                .gssize_format = "lli",
+                .glib_msize_type = "INT64",
+                .glib_intptr_type_define = "long long",
+                .gintptr_modifier = "ll",
+                .gintptr_format = "lli",
+                .guintptr_format = "llu",
+                .glib_gpi_cast = "(gint64)",
+                .glib_gpui_cast = "(guint64)",
+                .g_pollfd_format = switch (rt.cpu.arch) {
+                    .aarch64, .x86_64 => "%#llx",
+                    else => "%#x",
+                },
+            });
+        },
+        else => {
+            glibconfig_conf.addValues(.{
+                .g_pid_type = "int",
+                .g_pid_format = "i",
+                .g_pollfd_format = "%d",
+                .g_dir_separator = "/",
+                .g_searchpath_separator = ":",
+                .glib_size_type_define = "long",
+                .gsize_modifier = "l",
+                .gssize_modifier = "l",
+                .gsize_format = "lu",
+                .gssize_format = "li",
+                .glib_msize_type = "LONG",
+                .glib_intptr_type_define = "long",
+                .gintptr_modifier = "l",
+                .gintptr_format = "li",
+                .guintptr_format = "lu",
+                .glib_gpi_cast = "(glong)",
+                .glib_gpui_cast = "(gulong)",
+            });
+        },
+    }
 
     switch (linkage) {
         .static => glibconfig_conf.addValues(.{
@@ -238,8 +375,8 @@ pub fn build(b: *std.Build) !void {
         .PACKAGE_TARNAME = "glib",
         .PACKAGE_URL = "",
         .PACKAGE_VERSION = build_zon.version,
-        .ENABLE_NLS = 1,
-        ._GNU_SOURCE = 1,
+        .ENABLE_NLS = true,
+        ._GNU_SOURCE = true,
         // Poll doesn't work on devices on Windows, and macOS's poll() implementation is known to be broken
         .BROKEN_POLL = switch (rt.os.tag) {
             .macos, .windows => true,
@@ -251,31 +388,139 @@ pub fn build(b: *std.Build) !void {
             .windows => "0x0601",
             else => null,
         },
+        .EXEEXT = switch (rt.os.tag) {
+            .windows => ".exe",
+            else => "",
+        },
         .MAJOR_IN_TYPES = if (rt.isDarwinLibC() or rt.isNetBSDLibC() or rt.isFreeBSDLibC() or rt.isOpenBSDLibC()) true else null,
         // the clang bundled with Zig version `build_zon.minimum_zig_version`
         // supports __uint128_t
         .HAVE_UINT128_T = true,
+        .signed = {}, // make noop
+        .HAVE_PTRDIFF_T = true,
+        .HAVE_SIG_ATOMIC_T = true,
+    });
+
+    // Thread implementation
+    switch (rt.os.tag) {
+        .windows => {
+            glibconfig_conf.addValues(.{ .g_threads_impl_def = "WIN32" });
+            glib_conf.addValues(.{ .THREADS_WIN32 = true });
+        },
+        else => |oses| {
+            glibconfig_conf.addValues(.{ .g_threads_impl_def = "POSIX" });
+            glib_conf.addValues(.{
+                .THREADS_POSIX = true,
+                // all supported platforms have this
+                .HAVE_PTHREAD_ATTR_SETSTACKSIZE = true,
+                .HAVE_PTHREAD_ATTR_SETINHERITSCHED = true,
+                // all but darwin
+                .HAVE_PTHREAD_CONDATTR_SETCLOCK = if (!rt.isDarwinLibC()) true else false,
+                // Only on darwin and mingw
+                .HAVE_PTHREAD_COND_TIMEDWAIT_RELATIVE_NP = if (rt.isDarwinLibC()) true else false,
+                // all but openbsd
+                .HAVE_PTHREAD_GETNAME_NP = if (!rt.isOpenBSDLibC()) true else false,
+                // only on musl, glibc, netbsd and freebsd
+                .HAVE_PTHREAD_GETAFFINITY_NP = if (!(rt.isOpenBSDLibC() or rt.isDarwinLibC())) true else false,
+            });
+
+            switch (oses) {
+                .macos => glib_conf.addValues(.{
+                    .HAVE_PTHREAD_SETNAME_NP_WITHOUT_TID = true,
+                }),
+                .linux, .freebsd => glib_conf.addValues(.{
+                    .HAVE_PTHREAD_SETNAME_NP_WITH_TID = true,
+                }),
+                .netbsd => glib_conf.addValues(.{
+                    .HAVE_PTHREAD_SETNAME_NP_WITH_TID_AND_ARG = true,
+                }),
+                .openbsd => glib_conf.addValues(.{
+                    .HAVE_PTHREAD_SET_NAME_NP = true,
+                }),
+                else => unreachable,
+            }
+        },
+    }
+
+    glib_conf.addValues(.{
+        .SIZEOF_CHAR = rt.cTypeByteSize(.char),
+        .SIZEOF_INT = rt.cTypeByteSize(.int),
+
+        .SIZEOF_SHORT = rt.cTypeByteSize(.short),
+        .SIZEOF_LONG = rt.cTypeByteSize(.long),
+        .SIZEOF_LONG_LONG = rt.cTypeByteSize(.longlong),
+        .SIZEOF_SIZE_T = rt.ptrBitWidth() / 8,
+        .SIZEOF_SSIZE_T = rt.ptrBitWidth() / 8,
+        .SIZEOF_VOID_P = rt.ptrBitWidth() / 8,
+        .SIZEOF_WCHAR_T = if (!rt.isMinGW()) int64(4) else int64(2),
     });
 
     if (rt.isGnuLibC()) glib_conf.addValues(.{
         .STRERROR_R_CHAR_P = true,
         .HAVE_LOFF_T = true,
+        .HAVE_LANGINFO_ERA = true,
+        .HAVE_LANGINFO_OUTDIGIT = true,
+        .HAVE_LANGINFO_ABALTMON = true,
+        .HAVE_LANGINFO_TIME_CODESET = true,
+        .HAVE_LONG_LONG = true,
+        .HAVE_LONG_DOUBLE = true,
+        .HAVE_WCHAR_T = true,
+        .HAVE_WINT_T = true,
+        .HAVE_INTTYPES_H_WITH_UINTMAX = true,
+        .HAVE_STDINT_H_WITH_UINTMAX = true,
+        .HAVE_INTMAX_T = true,
     });
+
     if (rt.isGnuLibC() or rt.isMuslLibC()) glib_conf.addValues(.{
         .MAJOR_IN_SYSMACROS = true,
         .HAVE_UNSHARE = true,
     });
+
+    if (rt.isGnuLibC() or rt.isFreeBSDLibC()) glib_conf.addValues(.{
+        .HAVE_LANGINFO_ALTMON = true,
+    });
+
+    if (rt.isDarwinLibC()) glib_conf.addValues(.{
+        .HAVE_FCNTL_F_FULLFSYNC = true,
+    });
     // on platforms where `statfs.f_bavail` exist use the `statfs` syscall
     // directly as seen in  `struct_members.musl_glibc_darwin_free_open_bsd`
-    if (rt.isMuslLibC() or rt.isGnuLibC() or rt.isDarwinLibC() or rt.isFreeBSDLibC() or rt.isOpenBSDLibC()) glib_conf.addValues(.{
-        .USE_STATFS = true,
-    });
+    if (rt.isMuslLibC() or rt.isGnuLibC() or rt.isDarwinLibC() or
+        rt.isFreeBSDLibC() or rt.isOpenBSDLibC())
+        glib_conf.addValues(.{
+            .USE_STATFS = true,
+            .STATFS_ARGS = 2,
+        });
+
+    if (rt.isMuslLibC() or rt.isGnuLibC() or rt.isDarwinLibC() or
+        rt.isFreeBSDLibC() or rt.isOpenBSDLibC() or rt.isNetBSDLibC())
+        glib_conf.addValues(.{
+            .HAVE_OPEN_O_DIRECTORY = true,
+            .HAVE_C99_SNPRINTF = true,
+            .HAVE_C99_VSNPRINTF = true,
+            .HAVE_UNIX98_PRINTF = true,
+            .USE_SYSTEM_PRINTF = true,
+            .HAVE_LANGINFO_CODESET = true,
+            .HAVE_CODESET = true,
+            .HAVE_LANGINFO_TIME = true,
+        });
+
+    if (glib_conf.values.contains("USE_SYSTEM_PRINTF"))
+        glibconfig_conf.addValues(.{
+            .GLIB_USING_SYSTEM_PRINTF = true,
+        });
+
+    if (!glib_conf.values.get("USE_SYSTEM_PRINTF").?.boolean)
+        glib_conf.addValues(.{
+            .HAVE_VASPRINTF = true,
+        });
 
     //  check for header files
     platformHeadersConfig(glib_conf, b, &rt);
     if (glib_conf.values.contains("HAVE_LINUX_NETLINK_H") or
         glib_conf.values.contains("HAVE_NETLINK_NETLINK_H") or
-        glib_conf.values.contains("HAVE_NETLINK_NETLINK_ROUTE_H")) glib_conf.addValue("HAVE_NETLINK", u32, 1);
+        glib_conf.values.contains("HAVE_NETLINK_NETLINK_ROUTE_H"))
+        glib_conf.addValue("HAVE_NETLINK", u32, 1);
 
     // TODO: improve feature detection to actually be able to tell support
     // without compiling code
@@ -296,6 +541,7 @@ pub fn build(b: *std.Build) !void {
         }),
         else => {},
     }
+
     if (rt.os.tag == .linux and rt.ptrBitWidth() == 32) glib_conf.addValues(.{
         .HAVE_FUTEX_TIME64 = true,
     });
