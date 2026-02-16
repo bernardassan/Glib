@@ -37,7 +37,6 @@ pub fn build(b: *std.Build) !void {
     _ = selinux; // autofix
 
     const xattr = b.option(bool, "xattr", "build with xattr support") orelse true;
-    _ = xattr; // autofix
 
     const libmount = b.option(Feature, "libmount", "build with libmount support") orelse .auto;
     _ = libmount; // autofix
@@ -98,12 +97,10 @@ pub fn build(b: *std.Build) !void {
     const includedir = b.h_dir;
     const libexecdir = b.pathJoin(&.{ glib_libdir, "libexec" });
     const datadir = b.pathJoin(&.{ glib_prefix, "share" });
-    const localedir = b.pathJoin(&.{ glib_prefix, "share/locale" });
-    const localstatedir = b.pathJoin(&.{ glib_prefix, "state" });
+    const glib_localedir = b.pathJoin(&.{ glib_prefix, "share/locale" });
+    const glib_localstatedir = b.pathJoin(&.{ glib_prefix, "state" });
     const glib_libexecdir = b.pathJoin(&.{ glib_prefix, libexecdir });
     const glib_datadir = b.pathJoin(&.{ glib_prefix, datadir });
-    const glib_localedir = b.pathJoin(&.{ glib_prefix, localedir });
-    _ = glib_localedir; // autofix
     const glib_pkgdatadir = b.pathJoin(&.{ glib_datadir, "glib-2.0" });
     _ = glib_pkgdatadir; // autofix
     const glib_includedir = b.pathJoin(&.{ glib_prefix, includedir, "glib-2.0" });
@@ -113,8 +110,6 @@ pub fn build(b: *std.Build) !void {
 
     const glib_pkgconfigreldir = b.pathJoin(&.{ glib_libdir, "pkgconfig" });
     _ = glib_pkgconfigreldir; // autofix
-    const glib_localstatedir = b.pathJoin(&.{ glib_prefix, localstatedir });
-    _ = glib_localstatedir; // autofix
 
     const installed_tests_metadir = b.pathJoin(&.{ glib_datadir, "installed-tests", @tagName(build_zon.name) });
     _ = installed_tests_metadir; // autofix
@@ -169,6 +164,10 @@ pub fn build(b: *std.Build) !void {
         // It would remains in the process's address space even when dlclose()
         // is called
         "-Wl,-z,nodelete",
+    });
+
+    if (rt.isMinGW()) cflags.appendSliceAssumeCapacity(&.{
+        "-lws2_32", "-lole32", "-lwinmm", "-lshlwapi", "-luuid",
     });
 
     // Bind references to global functions to within the library itself to make
@@ -399,6 +398,19 @@ pub fn build(b: *std.Build) !void {
         .signed = {}, // make noop
         .HAVE_PTRDIFF_T = true,
         .HAVE_SIG_ATOMIC_T = true,
+        .GLIB_LOCALE_DIR = glib_localedir,
+        .GLIB_LOCALSTATEDIR = glib_localstatedir,
+        .GLIB_RUNSTATEDIR = "/run",
+        .HAVE_PROC_SELF_CMDLINE = if (rt.os.tag == .linux) true else false,
+        ._XOPEN_SOURCE = 800,
+        .__EXTENSIONS__ = true,
+        .HAVE__CRT_SET_REPORT_MODE = if (rt.isMinGW()) true else false,
+    });
+
+    // xattr
+    if (!rt.isMinGW() and xattr) if (rt.isMuslLibC() or rt.isGnuLibC() or rt.isNetBSDLibC()) glib_conf.addValues(.{
+        .HAVE_SYS_XATTR_H = true,
+        .HAVE_XATTR = true,
     });
 
     // Thread implementation
@@ -441,6 +453,19 @@ pub fn build(b: *std.Build) !void {
             }
         },
     }
+
+    // libintl
+    if (rt.isMuslLibC() or rt.isGnuLibC()) {
+        glib_conf.addValues(.{
+            .HAVE_BIND_TEXTDOMAIN_CODESET = true,
+        });
+    }
+
+    // gettext is required to be always present
+    glib_conf.addValues(.{
+        .HAVE_DCGETTEXT = true,
+        .HAVE_GETTEXT = true,
+    });
 
     glib_conf.addValues(.{
         .SIZEOF_CHAR = rt.cTypeByteSize(.char),
@@ -879,6 +904,7 @@ const functions = struct {
 
     const mingw: []const []const u8 = &.{
         "_aligned_malloc",
+        "_set_invalid_parameter_handler",
     };
 
     const unix: []const []const u8 = &.{
@@ -910,6 +936,7 @@ const functions = struct {
         "RTLD_NEXT",
         "mkostemp",
         "clock_gettime",
+        "strlcpy",
     };
 
     const musl_glibc: []const []const u8 = &.{
