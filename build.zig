@@ -288,7 +288,15 @@ pub fn build(b: *std.Build) !void {
         // Inet defines
         .g_af_unix = 1,
         .g_af_inet = 2,
-        .g_af_inet6 = if (is(&rt, &.{ .musl, .gnu })) int64(10) else if (rt.isDarwinLibC()) int64(30) else if (rt.isMinGW()) int64(23) else if (is(&rt, &.{ .openbsd, .netbsd })) int64(24) else if (rt.isFreeBSDLibC()) 28 else unreachable,
+        .g_af_inet6 = if (is(&rt, &.{ .musl, .gnu }))
+            int64(10)
+        else if (rt.isDarwinLibC())
+            int64(30)
+        else if (rt.isMinGW())
+            int64(23)
+        else if (is(&rt, &.{ .openbsd, .netbsd }))
+            int64(24)
+        else if (rt.isFreeBSDLibC()) 28 else unreachable,
         .g_msg_oob = 1,
         .g_msg_peek = 2,
         .g_msg_dontroute = 4,
