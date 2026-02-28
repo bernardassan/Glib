@@ -56,6 +56,7 @@ pub fn build(b: *std.Build) !void {
 
     const documentation = b.option(bool, "documentation", "Build API reference and tools documentation") orelse false;
     const bsymbolic_functions = b.option(bool, "bsymbolic_functions", "link with -Bsymbolic-functions if supported") orelse true;
+    _ = bsymbolic_functions; // autofix
     const force_posix_threads = b.option(bool, "force_posix_threads", "Also use posix threads in case the platform defaults to another implementation (on Windows for example)") orelse false;
     const enable_tests = b.option(bool, "tests", "build tests") orelse true;
     _ = enable_tests; // autofix
@@ -140,7 +141,8 @@ pub fn build(b: *std.Build) !void {
 
     // Disable strict aliasing;
     // see https://bugzilla.gnome.org/show_bug.cgi?id=791622
-    var cflags: std.ArrayList([]const u8) = try .initCapacity(b.allocator, 36);
+    var cflags: std.ArrayList([]const u8) = try .initCapacity(b.allocator, 64);
+    // TODO: remove all unnecessary warning switches
     cflags.appendSliceAssumeCapacity(&.{
         "-fno-strict-aliasing",
         "-D_XOPEN_SOURCE=800",
@@ -148,39 +150,76 @@ pub fn build(b: *std.Build) !void {
         "-Weverything",
         "-Wextra",
         "-Wno-c++98-compat",
+        "-Wno-c++-compat",
         "-Wno-declaration-after-statement",
+        "-Wno-pre-c11-compat",
         "-Wno-pre-c2x-compat",
         "-Wno-pre-c2y-compat",
         "-Wno-switch-default",
         "-Wno-unsafe-buffer-usage",
         "-Wno-used-but-marked-unused",
         "-Wno-vla",
+        "-Wno-shadow",
+        "-Wno-unreachable-code",
+        "-Wno-unused-macros",
+        "-Wno-embedded-directive",
+        "-Wno-unused-variable",
+        "-Wno-float-equal",
+        "-Wno-extra-semi",
+        "-Wno-implicit-function-declaration",
+        "-Wno-format",
+        "-Wno-missing-noreturn",
+        "-Wno-implicit-int-float-conversion",
+        "-Wno-double-promotion",
         "-Wno-unused-parameter",
+        "-Wno-disabled-macro-expansion",
+        "-Wno-invalid-token-paste",
+        "-Wno-deprecated-octal-literals",
+        "-Wno-sign-conversion",
+        "-Wno-assign-enum",
+        "-Wno-extra-semi-stmt",
+        "-Wno-switch-enum",
+        "-Wno-comma",
+        "-Wno-cast-align",
+        "-Wno-format",
+        "-Wno-implicit-const-int-float-conversion",
+        "-Wno-padded",
+        "-Wno-implicit-int-conversion",
+        "-Wno-c++11-extensions", // not sure if needed check
         "-Wno-cast-function-type",
-        // "-Wno-bad-function-cast",
+        "-Wno-duplicate-enum",
+        "-Wno-bad-function-cast",
+        "-Wno-cast-qual",
         "-Wno-format-zero-length",
         "-Wno-reserved-id-macro",
+        "-Wno-reserved-identifier",
+        "-Wno-unknown-attributes",
+        "-Wno-documentation",
+        "-Wno-documentation-unknown-command",
         // "-Wno-keyword-macro",
         "-Wno-variadic-macros",
         // "-Wno-string-plus-int",
         // "-Wno-typedef-redefinition",
-        "-pedantic",
+        // "-pedantic",
+        "-Wno-pedantic",
         "-pedantic-errors",
         "-std=c2y",
+        // TODO: reenable
         // Prevents the library(.so) from being unloaded from memory. Meaning
         // It would remains in the process's address space even when dlclose()
         // is called
-        "-Wl,-z,nodelete",
+        // "-Wl,-z,nodelete",
     });
 
     if (rt.isMinGW()) cflags.appendSliceAssumeCapacity(&.{
         "-lws2_32", "-lole32", "-lwinmm", "-lshlwapi", "-luuid",
     });
 
+    // TODO: reenable
     // Bind references to global functions to within the library itself to make
     // function calls faster because the dynamic linker doesn't have to resolve
     // symbol at runtime via the Procedure Linkage Table (PLT)
-    if (bsymbolic_functions) cflags.appendAssumeCapacity("-Wl,-Bsymbolic-functions");
+    // if (bsymbolic_functions) cflags.appendAssumeCapacity("-Wl,-Bsymbolic-functions");
 
     switch (optimize) {
         .Debug => cflags.appendAssumeCapacity("-DG_ENABLE_DEBUG"),
@@ -207,47 +246,43 @@ pub fn build(b: *std.Build) !void {
     const current = binary_age - interface_age;
     const library_version: std.SemanticVersion = .{ .major = soversion, .minor = current, .patch = interface_age };
 
+    const noop = .@"/* NOOP */";
+    const Os = enum {
+        @"#define G_OS_WIN32\n#define G_PLATFORM_WIN32",
+        @"#define G_OS_UNIX",
+    };
+    const Suffix = enum { so, dll };
     const glibconfig_conf = b.addConfigHeader(.{
         .style = .{
-            .cmake = upstream.path("glib/glibconfig.h.in"),
+            .meson = upstream.path("glib/glibconfig.h.in"),
         },
     }, .{
         .GLIB_MAJOR_VERSION = int64(major_version),
         .GLIB_MINOR_VERSION = int64(minor_version),
         .GLIB_MICRO_VERSION = int64(micro_version),
-        .GLIB_VERSION = build_zon.version,
-        // used by the .rc.in files
-        .LT_CURRENT_MINUS_AGE = soversion,
         .glib_os = switch (rt.os.tag) {
-            .windows =>
-            \\\#define G_OS_WIN32
-            \\\#define G_PLATFORM_WIN32
-            \\\
-            ,
-            .linux => "#define G_OS_UNIX",
-            else => null,
+            .windows => Os.@"#define G_OS_WIN32\n#define G_PLATFORM_WIN32",
+            else => Os.@"#define G_OS_UNIX",
         },
-        .glib_vacopy = "",
+        .glib_vacopy = noop,
         .G_HAVE_FREE_SIZED = if (rt.isGnuLibC()) true else null,
         .gint16 = .short,
         .gint16_modifier = "h",
         .gint16_format = "hi",
         .guint16_format = "hu",
         .gint32 = .int,
-        .gint32_modifier = "",
+        .gint32_modifier = noop,
         .gint32_format = "i",
         .guint32_format = "u",
         .gintbits = rt.cTypeBitSize(.int),
         .glongbits = rt.cTypeBitSize(.long),
         .gsizebits = rt.ptrBitWidth(),
-        .gssizebits = rt.ptrBitWidth(),
-        .g_module_suffix = if (rt.isMinGW()) "dll" else "so",
+        .g_module_suffix = if (rt.isMinGW()) Suffix.dll else Suffix.so,
         .glib_void_p = rt.ptrBitWidth() / 8,
         .glib_long = rt.cTypeByteSize(.long),
         .glib_size_t = rt.ptrBitWidth() / 8,
         .glib_ssize_t = rt.ptrBitWidth() / 8,
         .GLIB_HAVE_ALLOCA_H = if (!rt.isMinGW()) true else false,
-        .GLIB_HAVE_SYS_POLL_H = if (!rt.isMinGW()) true else false,
         // Unix has these poll values and it windows builds uses same for abi
         // compatibility due to historical bug
         .g_pollin = 1,
@@ -263,8 +298,6 @@ pub fn build(b: *std.Build) !void {
         .g_msg_oob = 1,
         .g_msg_peek = 2,
         .g_msg_dontroute = 4,
-        .HAVE_IPV6 = true,
-        ._GLIB_GCC_HAVE_SYNC_SWAP = true,
         .G_ATOMIC_LOCK_FREE = true,
         // support only systems where stack grows downward
         .G_HAVE_GROWING_STACK = false,
@@ -272,57 +305,57 @@ pub fn build(b: *std.Build) !void {
 
     switch (rt.cpu.arch.endian()) {
         .little => glibconfig_conf.addValues(.{
-            .g_byte_order = "G_LITTLE_ENDIAN",
-            .g_bs_native = "LE",
-            .g_bs_alien = "BE",
+            .g_byte_order = .G_LITTLE_ENDIAN,
+            .g_bs_native = .LE,
+            .g_bs_alien = .BE,
         }),
         .big => glibconfig_conf.addValues(.{
-            .g_byte_order = "G_BIG_ENDIAN",
-            .g_bs_native = "BE",
-            .g_bs_alien = "LE",
+            .g_byte_order = .G_BIG_ENDIAN,
+            .g_bs_native = .BE,
+            .g_bs_alien = .LE,
         }),
     }
 
     if (rt.cTypeByteSize(.long) == 8)
         glibconfig_conf.addValues(.{
-            .gint64 = "long",
-            .glib_extension = "",
+            .gint64 = .long,
+            .glib_extension = noop,
             .gint64_modifier = "l",
             .gint64_format = "li",
             .guint64_format = "lu",
-            .gint64_constant = "(val##L)",
-            .guint64_constant = "(val##UL)",
+            .gint64_constant = .@"(val##L)",
+            .guint64_constant = .@"(val##UL)",
         })
     else
         glibconfig_conf.addValues(.{
-            .gint64 = "long long",
+            .gint64 = .@"long long",
             .glib_extension = .G_GNUC_EXTENSION,
             .gint64_modifier = "ll",
             .gint64_format = "lli",
             .guint64_format = "llu",
-            .gint64_constant = "(G_GNUC_EXTENSION (val##LL))",
-            .guint64_constant = "(G_GNUC_EXTENSION (val##ULL))",
+            .gint64_constant = .@"(G_GNUC_EXTENSION (val##LL))",
+            .guint64_constant = .@"(G_GNUC_EXTENSION (val##ULL))",
         });
 
     switch (rt.os.tag) {
         .windows => {
             glibconfig_conf.addValues(.{
-                .g_pid_type = "void*",
+                .g_pid_type = .@"void*",
                 .g_pid_format = "p",
-                .g_dir_separator = "\\\\",
-                .g_searchpath_separator = ";",
-                .glib_size_type_define = "long long",
+                .g_dir_separator = .@"\\\\",
+                .g_searchpath_separator = .@";",
+                .glib_size_type_define = .@"long long",
                 .gsize_modifier = "ll",
                 .gssize_modifier = "ll",
                 .gsize_format = "llu",
                 .gssize_format = "lli",
-                .glib_msize_type = "INT64",
-                .glib_intptr_type_define = "long long",
+                .glib_msize_type = .INT64,
+                .glib_intptr_type_define = .@"long long",
                 .gintptr_modifier = "ll",
                 .gintptr_format = "lli",
                 .guintptr_format = "llu",
-                .glib_gpi_cast = "(gint64)",
-                .glib_gpui_cast = "(guint64)",
+                .glib_gpi_cast = .@"(gint64)",
+                .glib_gpui_cast = .@"(guint64)",
                 .g_pollfd_format = switch (rt.cpu.arch) {
                     .aarch64, .x86_64 => "%#llx",
                     else => "%#x",
@@ -331,23 +364,23 @@ pub fn build(b: *std.Build) !void {
         },
         else => {
             glibconfig_conf.addValues(.{
-                .g_pid_type = "int",
+                .g_pid_type = .int,
                 .g_pid_format = "i",
                 .g_pollfd_format = "%d",
-                .g_dir_separator = "/",
-                .g_searchpath_separator = ":",
-                .glib_size_type_define = "long",
+                .g_dir_separator = .@"/",
+                .g_searchpath_separator = .@":",
+                .glib_size_type_define = .long,
                 .gsize_modifier = "l",
                 .gssize_modifier = "l",
                 .gsize_format = "lu",
                 .gssize_format = "li",
-                .glib_msize_type = "LONG",
-                .glib_intptr_type_define = "long",
+                .glib_msize_type = .LONG,
+                .glib_intptr_type_define = .long,
                 .gintptr_modifier = "l",
                 .gintptr_format = "li",
                 .guintptr_format = "lu",
-                .glib_gpi_cast = "(glong)",
-                .glib_gpui_cast = "(gulong)",
+                .glib_gpi_cast = .@"(glong)",
+                .glib_gpui_cast = .@"(gulong)",
             });
         },
     }
@@ -367,7 +400,7 @@ pub fn build(b: *std.Build) !void {
 
     const glib_conf = b.addConfigHeader(.{
         .style = .blank,
-        .include_path = "build/config.h",
+        .include_path = "config.h",
     }, .{
         .GLIB_MAJOR_VERSION = int64(major_version),
         .GLIB_MINOR_VERSION = int64(minor_version),
@@ -391,7 +424,7 @@ pub fn build(b: *std.Build) !void {
         ._FILE_OFFSET_BITS = 64,
         // the Zig Mingw windows target is not UWP compatible
         ._WIN32_WINNT = switch (rt.os.tag) {
-            .windows => "0x0601",
+            .windows => int64(0x0601),
             else => null,
         },
         .EXEEXT = switch (rt.os.tag) {
@@ -402,7 +435,6 @@ pub fn build(b: *std.Build) !void {
         // the clang bundled with Zig version `build_zon.minimum_zig_version`
         // supports __uint128_t
         .HAVE_UINT128_T = true,
-        .signed = {}, // make noop
         .HAVE_PTRDIFF_T = true,
         .HAVE_SIG_ATOMIC_T = true,
         .GLIB_LOCALE_DIR = glib_localedir,
@@ -412,6 +444,9 @@ pub fn build(b: *std.Build) !void {
         ._XOPEN_SOURCE = 800,
         .__EXTENSIONS__ = true,
         .HAVE__CRT_SET_REPORT_MODE = if (rt.isMinGW()) true else false,
+        .HAVE_IPV6 = true,
+        // only used by the .rc.in files
+        .LT_CURRENT_MINUS_AGE = soversion,
     });
 
     // xattr
@@ -423,11 +458,11 @@ pub fn build(b: *std.Build) !void {
     // Thread implementation
     switch (rt.os.tag) {
         .windows => {
-            glibconfig_conf.addValues(.{ .g_threads_impl_def = "WIN32" });
+            glibconfig_conf.addValues(.{ .g_threads_impl_def = .WIN32 });
             glib_conf.addValues(.{ .THREADS_WIN32 = true });
         },
         else => |oses| {
-            glibconfig_conf.addValues(.{ .g_threads_impl_def = "POSIX" });
+            glibconfig_conf.addValues(.{ .g_threads_impl_def = .POSIX });
             glib_conf.addValues(.{
                 .THREADS_POSIX = true,
                 // all supported platforms have this
@@ -562,8 +597,12 @@ pub fn build(b: *std.Build) !void {
     // without compiling code
     if (!rt.isBionicLibC()) glib_conf.addValue("HAVE_STATX", u32, 1);
     if (rt.os.tag != .windows) glib_conf.addValue("HAVE_LC_MESSAGES", u32, 1);
+
     //  check for struct members in libc
     struct_members.config(glib_conf, b, &rt);
+
+    //  check for functions in libc
+    functions.config(glib_conf, b, &rt);
 
     switch (builtin.os.tag) {
         // TODO: handle compiling with -framework Foundation and AppKit
@@ -582,23 +621,15 @@ pub fn build(b: *std.Build) !void {
         .HAVE_FUTEX_TIME64 = true,
     });
 
-    const version_h = b.addConfigHeader(.{
-        .style = .{
-            .autoconf_at = upstream.path("glib/gversionmacros.h.in"),
-        },
-    }, .{
-        .GLIB_VERSIONS = @embedFile("build/glib_versions.h"),
-    });
-
     // TODO: install library and include directories
     try glib.build(b, .{
+        .version = version,
         .library_version = library_version,
         .cflags = &cflags,
         .linkage = linkage,
         .optimize = optimize,
         .target = target,
         .upstream = upstream,
-        .version_h = version_h,
         .glibconfig_conf = glibconfig_conf,
         .glib_conf = glib_conf,
     });

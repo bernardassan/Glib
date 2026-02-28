@@ -10,6 +10,7 @@ const c_flags: []const []const u8 = &.{
 };
 
 const Config = struct {
+    version: std.SemanticVersion,
     library_version: std.SemanticVersion,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
@@ -18,7 +19,6 @@ const Config = struct {
     upstream: *std.Build.Dependency,
     glib_conf: *Step.ConfigHeader,
     glibconfig_conf: *Step.ConfigHeader,
-    version_h: *Step.ConfigHeader,
 };
 
 // Linux, Windows, MacOs, Freebsd, Netbsd and Openbsd can spawn
@@ -29,7 +29,6 @@ pub fn build(b: *std.Build, config: Config) !void {
     const upstream = config.upstream;
     const glib_conf = config.glib_conf;
     const glibconfig_conf = config.glibconfig_conf;
-    const version_h = config.version_h;
     const rt = config.target.result;
 
     const unix_headers: []const []const u8 = &.{
@@ -48,21 +47,58 @@ pub fn build(b: *std.Build, config: Config) !void {
     };
     _ = windows_headers; // autofix
 
+    const gen_macros = b.addExecutable(.{
+        .linkage = .static,
+        .name = "gen-macros",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("build/gen-macros.zig"),
+            .optimize = .Debug,
+            .target = b.graph.host,
+        }),
+        .use_lld = false,
+        .use_llvm = false,
+    });
+
+    const version = b.fmt("{f}", .{config.version});
+
+    const version_macros_h = blk: {
+        const run_gen_macros = b.addRunArtifact(gen_macros);
+        run_gen_macros.addArgs(&.{
+            version,
+            "versions-macros",
+        });
+        run_gen_macros.addFileArg(upstream.path("glib/gversionmacros.h.in"));
+        const version_macros = run_gen_macros.addOutputFileArg("glib/gversionmacros.h");
+        break :blk version_macros;
+    };
+
+    const visibility_h = blk: {
+        const run_gen_macros = b.addRunArtifact(gen_macros);
+        run_gen_macros.addArgs(&.{
+            version,
+            "visibility-macros",
+            "GLIB",
+        });
+        const visibility_macros = run_gen_macros.addOutputFileArg("glib/glib-visibility.h");
+        break :blk visibility_macros;
+    };
+
     const glib_mod = b.createModule(.{
         .link_libc = true,
         .optimize = config.optimize,
         .target = config.target,
     });
-    glib_mod.addIncludePath(b.path("build"));
+
+    glib_mod.addConfigHeader(glib_conf);
+    glib_mod.addConfigHeader(glibconfig_conf);
+    glib_mod.addIncludePath(version_macros_h.dirname().dirname());
+    glib_mod.addIncludePath(visibility_h.dirname().dirname());
     glib_mod.addIncludePath(upstream.path("."));
     glib_mod.addIncludePath(upstream.path("glib"));
     glib_mod.addIncludePath(upstream.path("gobject"));
     glib_mod.addIncludePath(upstream.path("gmodule"));
     glib_mod.addIncludePath(upstream.path("gio"));
     glib_mod.addIncludePath(upstream.path("girepository"));
-    glib_mod.addConfigHeader(glib_conf);
-    glib_mod.addConfigHeader(glibconfig_conf);
-    glib_mod.addConfigHeader(version_h);
 
     config.cflags.appendSliceAssumeCapacity(c_flags);
     glib_mod.addCSourceFiles(.{
@@ -76,12 +112,9 @@ pub fn build(b: *std.Build, config: Config) !void {
         .name = "glib-2.0",
         .root_module = glib_mod,
         .linkage = config.linkage,
-        .max_rss = 1024 * 1024,
+        .max_rss = 160 * 1024 * 1024,
         .version = config.library_version,
     });
-
-    glib.step.dependOn(&version_h.step);
-    glib.step.dependOn(&glib_conf.step);
 
     b.installArtifact(glib);
     _ = unix_headers; // autofix
