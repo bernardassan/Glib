@@ -189,20 +189,31 @@ pub fn build(b: *std.Build) !void {
         "-Wsign-conversion",
         // FIXME: See https://gitlab.gnome.org/GNOME/glib/-/issues/3527
         "-Wshorten-64-to-32",
-        // Prevents the library(.so) from being unloaded from memory. Meaning
-        // It would remains in the process's address space even when dlclose()
-        // is called
-        "-Wl,-z,nodelete",
     });
 
     if (rt.isMinGW()) cflags.appendSliceAssumeCapacity(&.{
         "-lws2_32", "-lole32", "-lwinmm", "-lshlwapi", "-luuid",
     });
 
-    // Bind references to global functions to within the library itself to make
-    // function calls faster because the dynamic linker doesn't have to resolve
-    // symbol at runtime via the Procedure Linkage Table (PLT)
-    if (bsymbolic_functions) cflags.appendAssumeCapacity("-Wl,-Bsymbolic-functions");
+    switch (linkage) {
+        .dynamic => {
+            switch (rt.os.tag) {
+                .linux => {
+                    // Prevents the library(.so) from being unloaded from
+                    // memory. Meaning It would remains in the process's
+                    // address space even when dlclose() is called
+                    cflags.appendAssumeCapacity("-Wl,-z,nodelete");
+                    // Bind references to global functions to within the
+                    // library itself to make function calls faster because the
+                    // dynamic linker doesn't have to resolve symbol at runtime
+                    // via the Procedure Linkage Table (PLT)
+                    if (bsymbolic_functions) cflags.appendAssumeCapacity("-Wl,-Bsymbolic-functions");
+                },
+                else => {},
+            }
+        },
+        else => {},
+    }
 
     switch (optimize) {
         .Debug => cflags.appendAssumeCapacity("-DG_ENABLE_DEBUG"),
