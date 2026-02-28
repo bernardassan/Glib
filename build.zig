@@ -56,7 +56,6 @@ pub fn build(b: *std.Build) !void {
 
     const documentation = b.option(bool, "documentation", "Build API reference and tools documentation") orelse false;
     const bsymbolic_functions = b.option(bool, "bsymbolic_functions", "link with -Bsymbolic-functions if supported") orelse true;
-    _ = bsymbolic_functions; // autofix
     const force_posix_threads = b.option(bool, "force_posix_threads", "Also use posix threads in case the platform defaults to another implementation (on Windows for example)") orelse false;
     const enable_tests = b.option(bool, "tests", "build tests") orelse true;
     _ = enable_tests; // autofix
@@ -139,87 +138,71 @@ pub fn build(b: *std.Build) !void {
     // Don’t build the tests unless we can run them (either natively, in an exe wrapper, or by installing them for later use)
     // const build_tests = enable_tests and (!run_test.skip_foreign_checks or installed_tests_enabled);
 
-    // Disable strict aliasing;
-    // see https://bugzilla.gnome.org/show_bug.cgi?id=791622
-    var cflags: std.ArrayList([]const u8) = try .initCapacity(b.allocator, 64);
-    // TODO: remove all unnecessary warning switches
+    var cflags: std.ArrayList([]const u8) = try .initCapacity(b.allocator, 48);
     cflags.appendSliceAssumeCapacity(&.{
+        "-std=c2y",
+        // Disable strict aliasing;
+        // see https://bugzilla.gnome.org/show_bug.cgi?id=791622
         "-fno-strict-aliasing",
         "-D_XOPEN_SOURCE=800",
         "-Wall",
-        "-Weverything",
         "-Wextra",
-        "-Wno-c++98-compat",
-        "-Wno-c++-compat",
-        "-Wno-declaration-after-statement",
-        "-Wno-pre-c11-compat",
-        "-Wno-pre-c2x-compat",
-        "-Wno-pre-c2y-compat",
-        "-Wno-switch-default",
-        "-Wno-unsafe-buffer-usage",
-        "-Wno-used-but-marked-unused",
-        "-Wno-vla",
-        "-Wno-shadow",
-        "-Wno-unreachable-code",
-        "-Wno-unused-macros",
-        "-Wno-embedded-directive",
-        "-Wno-unused-variable",
-        "-Wno-float-equal",
-        "-Wno-extra-semi",
-        "-Wno-implicit-function-declaration",
-        "-Wno-format",
-        "-Wno-missing-noreturn",
-        "-Wno-implicit-int-float-conversion",
-        "-Wno-double-promotion",
+        "-Wduplicated-branches",
+        "-Wfloat-conversion",
+        "-Wimplicit-fallthrough",
+        "-Wmisleading-indentation",
+        "-Wmissing-field-initializers",
+        "-Wnonnull",
+        "-Wnull-dereference",
+        "-Wunused",
+        // Due to maintained deprecated code, we do not want to see unused
+        // parameters
         "-Wno-unused-parameter",
-        "-Wno-disabled-macro-expansion",
-        "-Wno-invalid-token-paste",
-        "-Wno-deprecated-octal-literals",
-        "-Wno-sign-conversion",
-        "-Wno-assign-enum",
-        "-Wno-extra-semi-stmt",
-        "-Wno-switch-enum",
-        "-Wno-comma",
-        "-Wno-cast-align",
-        "-Wno-format",
-        "-Wno-implicit-const-int-float-conversion",
-        "-Wno-padded",
-        "-Wno-implicit-int-conversion",
-        "-Wno-c++11-extensions", // not sure if needed check
+        // Due to pervasive use of things like GPOINTER_TO_UINT(), we do not
+        // support building with -Wbad-function-cast.
         "-Wno-cast-function-type",
-        "-Wno-duplicate-enum",
-        "-Wno-bad-function-cast",
-        "-Wno-cast-qual",
-        "-Wno-format-zero-length",
-        "-Wno-reserved-id-macro",
-        "-Wno-reserved-identifier",
-        "-Wno-unknown-attributes",
-        "-Wno-documentation",
-        "-Wno-documentation-unknown-command",
-        // "-Wno-keyword-macro",
-        "-Wno-variadic-macros",
-        // "-Wno-string-plus-int",
-        // "-Wno-typedef-redefinition",
-        // "-pedantic",
+        // Due to function casts through (void*) we cannot support -Wpedantic:
+        // ./docs/toolchain-requirements.md#Function_pointer_conversions.
         "-Wno-pedantic",
-        "-pedantic-errors",
-        "-std=c2y",
-        // TODO: reenable
+        // A zero-length format string shouldn't be considered an issue.
+        "-Wno-format-zero-length",
+        // We explicitly require variadic macros
+        "-Wno-variadic-macros",
+        "-Werror=format=2",
+        "-Werror=init-self",
+        "-Werror=missing-include-dirs",
+        "-Werror=pointer-arith",
+        "-Werror=unused-result",
+        "-Wstrict-prototypes",
+        // Due to pervasive use of things like GPOINTER_TO_UINT(), we do not
+        // support building with -Wbad-function-cast.
+        "-Wno-bad-function-cast",
+        "-Werror=implicit-function-declaration",
+        "-Werror=missing-prototypes",
+        "-Werror=pointer-sign",
+        "-Wno-string-plus-int",
+        // We require a compiler that supports C11 even though it's not yet a
+        // strict requirement, so allow typedef redefinition not to break clang
+        // and older gcc versions.
+        "-Wno-typedef-redefinition",
+        // FIXME: See https://gitlab.gnome.org/GNOME/glib/-/issues/3405
+        "-Wsign-conversion",
+        // FIXME: See https://gitlab.gnome.org/GNOME/glib/-/issues/3527
+        "-Wshorten-64-to-32",
         // Prevents the library(.so) from being unloaded from memory. Meaning
         // It would remains in the process's address space even when dlclose()
         // is called
-        // "-Wl,-z,nodelete",
+        "-Wl,-z,nodelete",
     });
 
     if (rt.isMinGW()) cflags.appendSliceAssumeCapacity(&.{
         "-lws2_32", "-lole32", "-lwinmm", "-lshlwapi", "-luuid",
     });
 
-    // TODO: reenable
     // Bind references to global functions to within the library itself to make
     // function calls faster because the dynamic linker doesn't have to resolve
     // symbol at runtime via the Procedure Linkage Table (PLT)
-    // if (bsymbolic_functions) cflags.appendAssumeCapacity("-Wl,-Bsymbolic-functions");
+    if (bsymbolic_functions) cflags.appendAssumeCapacity("-Wl,-Bsymbolic-functions");
 
     switch (optimize) {
         .Debug => cflags.appendAssumeCapacity("-DG_ENABLE_DEBUG"),
