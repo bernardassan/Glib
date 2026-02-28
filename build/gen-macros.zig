@@ -16,7 +16,6 @@ const Dir = std.Io.Dir;
 const SubCommand = enum {
     @"visibility-macros",
     @"versions-macros",
-    @"doc-sections",
 };
 
 const Namespace = enum {
@@ -33,7 +32,6 @@ const usage =
     \\Subcommands:
     \\  visibility-macros <namespace> <out_path>
     \\  versions-macros <in_path> <out_path>
-    \\  doc-sections <in_path> <out_path>
     \\
     \\Namespaces:
     \\  GLIB
@@ -74,9 +72,6 @@ pub fn main(init: process.Init) !void {
         },
         .@"versions-macros" => {
             try genVersionsMacros(io, gpa, args[3], args[4], minor_version);
-        },
-        .@"doc-sections" => {
-            try genDocSections(io, gpa, args[3], args[4], minor_version);
         },
     }
 }
@@ -123,42 +118,6 @@ fn genVersionsMacros(
                     \\#define GLIB_VERSION_2_{[minor]d}       (G_ENCODE_VERSION (2, {[minor]d}))
                     \\
                 , .{ .minor = minor, .since = since });
-            }
-        } else {
-            try w.writeAll(line);
-            if (!is_last) try w.writeByte('\n');
-        }
-    }
-}
-
-fn genDocSections(
-    io: std.Io,
-    alloc: mem.Allocator,
-    in_path: []const u8,
-    out_path: []const u8,
-    current_minor_version: usize,
-) !void {
-    const in_file = try Dir.cwd().openFile(io, in_path, .{});
-    const stat = try in_file.stat(io);
-    const buffer = try alloc.alloc(u8, stat.size);
-    defer alloc.free(buffer);
-
-    _ = try in_file.readPositionalAll(io, buffer, 0);
-
-    const out_file = try Dir.cwd().createFile(io, out_path, .{});
-    defer out_file.close(io);
-
-    var writer = out_file.writer(io, &.{});
-    const w = &writer.interface;
-
-    var line_iter = mem.splitAny(u8, buffer, "\n\t");
-    while (line_iter.next()) |line| {
-        const is_last = line_iter.peek() == null;
-
-        if (mem.indexOf(u8, line, "@GLIB_VERSIONS@") != null) {
-            var minor: u32 = 2;
-            while (minor <= current_minor_version + 2) : (minor += 2) {
-                try w.print("GLIB_VERSION_2_{d}\n", .{minor});
             }
         } else {
             try w.writeAll(line);
