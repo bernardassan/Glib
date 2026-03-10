@@ -241,11 +241,6 @@ pub fn build(b: *std.Build) !void {
     const library_version: std.SemanticVersion = .{ .major = soversion, .minor = current, .patch = interface_age };
 
     const noop = .@"/* NOOP */";
-    const Os = enum {
-        @"#define G_OS_WIN32\n#define G_PLATFORM_WIN32",
-        @"#define G_OS_UNIX",
-    };
-    const Suffix = enum { so, dll };
     const glibconfig_conf = b.addConfigHeader(.{
         .style = .{
             .meson = upstream.path("glib/glibconfig.h.in"),
@@ -255,23 +250,23 @@ pub fn build(b: *std.Build) !void {
         .GLIB_MINOR_VERSION = int64(minor_version),
         .GLIB_MICRO_VERSION = int64(micro_version),
         .glib_os = switch (rt.os.tag) {
-            .windows => Os.@"#define G_OS_WIN32\n#define G_PLATFORM_WIN32",
-            else => Os.@"#define G_OS_UNIX",
+            .windows => "#define G_OS_WIN32\n#define G_PLATFORM_WIN32",
+            else => "#define G_OS_UNIX",
         },
         .glib_vacopy = noop,
         .G_HAVE_FREE_SIZED = if (rt.isGnuLibC()) true else null,
         .gint16 = .short,
-        .gint16_modifier = "h",
-        .gint16_format = "hi",
-        .guint16_format = "hu",
+        .gint16_modifier = quote("h"),
+        .gint16_format = quote("hi"),
+        .guint16_format = quote("hu"),
         .gint32 = .int,
         .gint32_modifier = noop,
-        .gint32_format = "i",
-        .guint32_format = "u",
+        .gint32_format = quote("i"),
+        .guint32_format = quote("u"),
         .gintbits = rt.cTypeBitSize(.int),
         .glongbits = rt.cTypeBitSize(.long),
         .gsizebits = rt.ptrBitWidth(),
-        .g_module_suffix = if (rt.isMinGW()) Suffix.dll else Suffix.so,
+        .g_module_suffix = if (rt.isMinGW()) "dll" else "so",
         .glib_void_p = rt.ptrBitWidth() / 8,
         .glib_long = rt.cTypeByteSize(.long),
         .glib_size_t = rt.ptrBitWidth() / 8,
@@ -322,9 +317,9 @@ pub fn build(b: *std.Build) !void {
         glibconfig_conf.addValues(.{
             .gint64 = .long,
             .glib_extension = noop,
-            .gint64_modifier = "l",
-            .gint64_format = "li",
-            .guint64_format = "lu",
+            .gint64_modifier = quote("l"),
+            .gint64_format = quote("li"),
+            .guint64_format = quote("lu"),
             .gint64_constant = .@"(val##L)",
             .guint64_constant = .@"(val##UL)",
         })
@@ -332,9 +327,9 @@ pub fn build(b: *std.Build) !void {
         glibconfig_conf.addValues(.{
             .gint64 = .@"long long",
             .glib_extension = .G_GNUC_EXTENSION,
-            .gint64_modifier = "ll",
-            .gint64_format = "lli",
-            .guint64_format = "llu",
+            .gint64_modifier = quote("ll"),
+            .gint64_format = quote("lli"),
+            .guint64_format = quote("llu"),
             .gint64_constant = .@"(G_GNUC_EXTENSION (val##LL))",
             .guint64_constant = .@"(G_GNUC_EXTENSION (val##ULL))",
         });
@@ -347,40 +342,40 @@ pub fn build(b: *std.Build) !void {
                 .g_dir_separator = .@"\\\\",
                 .g_searchpath_separator = .@";",
                 .glib_size_type_define = .@"long long",
-                .gsize_modifier = "ll",
-                .gssize_modifier = "ll",
-                .gsize_format = "llu",
-                .gssize_format = "lli",
+                .gsize_modifier = quote("ll"),
+                .gssize_modifier = quote("ll"),
+                .gsize_format = quote("llu"),
+                .gssize_format = quote("lli"),
                 .glib_msize_type = .INT64,
                 .glib_intptr_type_define = .@"long long",
-                .gintptr_modifier = "ll",
-                .gintptr_format = "lli",
-                .guintptr_format = "llu",
+                .gintptr_modifier = quote("ll"),
+                .gintptr_format = quote("lli"),
+                .guintptr_format = quote("llu"),
                 .glib_gpi_cast = .@"(gint64)",
                 .glib_gpui_cast = .@"(guint64)",
                 .g_pollfd_format = switch (rt.cpu.arch) {
-                    .aarch64, .x86_64 => "%#llx",
-                    else => "%#x",
+                    .aarch64, .x86_64 => quote("%#llx"),
+                    else => quote("%#x"),
                 },
             });
         },
         else => {
             glibconfig_conf.addValues(.{
                 .g_pid_type = .int,
-                .g_pid_format = "i",
-                .g_pollfd_format = "%d",
+                .g_pid_format = quote("i"),
+                .g_pollfd_format = quote("%d"),
                 .g_dir_separator = .@"/",
                 .g_searchpath_separator = .@":",
                 .glib_size_type_define = .long,
-                .gsize_modifier = "l",
-                .gssize_modifier = "l",
-                .gsize_format = "lu",
-                .gssize_format = "li",
+                .gsize_modifier = quote("l"),
+                .gssize_modifier = quote("l"),
+                .gsize_format = quote("lu"),
+                .gssize_format = quote("li"),
                 .glib_msize_type = .LONG,
                 .glib_intptr_type_define = .long,
-                .gintptr_modifier = "l",
-                .gintptr_format = "li",
-                .guintptr_format = "lu",
+                .gintptr_modifier = quote("l"),
+                .gintptr_format = quote("li"),
+                .guintptr_format = quote("lu"),
                 .glib_gpi_cast = .@"(glong)",
                 .glib_gpui_cast = .@"(gulong)",
             });
@@ -430,8 +425,8 @@ pub fn build(b: *std.Build) !void {
             else => null,
         },
         .EXEEXT = switch (rt.os.tag) {
-            .windows => ".exe",
-            else => "",
+            .windows => quote(".exe"),
+            else => null,
         },
         .MAJOR_IN_TYPES = if (is(&rt, &.{ .darwin, .freebsd, .openbsd, .netbsd })) true else null,
         // the clang bundled with Zig version `build_zon.minimum_zig_version`
@@ -441,7 +436,7 @@ pub fn build(b: *std.Build) !void {
         .HAVE_SIG_ATOMIC_T = true,
         .GLIB_LOCALE_DIR = glib_localedir,
         .GLIB_LOCALSTATEDIR = glib_localstatedir,
-        .GLIB_RUNSTATEDIR = "/run",
+        .GLIB_RUNSTATEDIR = quote("/run"),
         .HAVE_PROC_SELF_CMDLINE = if (rt.os.tag == .linux) true else false,
         ._XOPEN_SOURCE = 800,
         .__EXTENSIONS__ = true,
@@ -639,4 +634,8 @@ pub fn build(b: *std.Build) !void {
 
 fn int64(value: anytype) i64 {
     return @intCast(value);
+}
+
+fn quote(comptime value: []const u8) []const u8 {
+    return "\"" ++ value ++ "\"";
 }
