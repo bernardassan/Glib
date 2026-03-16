@@ -57,7 +57,7 @@ pub fn main(init: process.Init) !void {
     const subcommand_str = args[2];
 
     // Parse version: expect "2.X.Y"
-    var glib_version = std.SemanticVersion.parse(glib_version_str) catch unreachable;
+    const glib_version = std.SemanticVersion.parse(glib_version_str) catch unreachable;
     const major_version = glib_version.major;
     const minor_version = glib_version.minor;
     std.debug.assert(major_version == 2);
