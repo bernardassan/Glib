@@ -9,7 +9,7 @@ const struct_members = platform.struct_members;
 const functions = platform.functions;
 const is = platform.is;
 
-const glib = @import("build/glib.zig");
+const glib = @import("build/glib/root.zig");
 
 const Buildtype = enum { debugoptimized };
 const WarnLevel = enum { @"1", @"2", @"3" };

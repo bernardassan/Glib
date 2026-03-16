@@ -1,7 +1,7 @@
 const std = @import("std");
 const Step = std.Build.Step;
 
-const platform = @import("platform.zig");
+const platform = @import("../platform.zig");
 const is = platform.is;
 
 const c_flags: []const []const u8 = &.{
