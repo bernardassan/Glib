@@ -37,7 +37,6 @@ pub fn build(b: *std.Build) !void {
 
     const linkage = b.option(std.builtin.LinkMode, "linkage", "linkage mode for library") orelse .static;
 
-    const gio_module_dir = b.option([]const u8, "gio_module_dir", "load gio modules from this directory (default to '${libdir}/gio/modules' if unset)");
     const selinux = b.option(Feature, "selinux", "build with selinux support") orelse .auto;
     _ = selinux; // autofix
 
@@ -99,6 +98,11 @@ pub fn build(b: *std.Build) !void {
     const glib_bindir = b.exe_dir;
     _ = glib_bindir; // autofix
     const glib_libdir = b.lib_dir;
+    const gio_module_dir = b.option(
+        []const u8,
+        "gio_module_dir",
+        b.fmt("load gio modules from this directory (default to '${[libdir]s}/gio/modules' if unset)", .{ .libdir = glib_libdir }),
+    );
     const includedir = b.h_dir;
     const libexecdir = b.pathJoin(&.{ glib_libdir, "libexec" });
     const datadir = b.pathJoin(&.{ glib_prefix, "share" });
@@ -109,7 +113,6 @@ pub fn build(b: *std.Build) !void {
     const glib_pkgdatadir = b.pathJoin(&.{ glib_datadir, "glib-2.0" });
     _ = glib_pkgdatadir; // autofix
     const glib_includedir = b.pathJoin(&.{ glib_prefix, includedir, "glib-2.0" });
-    _ = glib_includedir; // autofix
     const glib_giomodulesdir = if (gio_module_dir) |gio_modules_dir| b.pathJoin(&.{ glib_prefix, gio_modules_dir }) else b.pathJoin(&.{ glib_libdir, "gio", "modules" });
     _ = glib_giomodulesdir; // autofix
 
@@ -139,6 +142,8 @@ pub fn build(b: *std.Build) !void {
     // const build_tests = enable_tests and (!run_test.skip_foreign_checks or installed_tests_enabled);
 
     var cflags: std.ArrayList([]const u8) = try .initCapacity(b.allocator, 48);
+    defer cflags.deinit(b.allocator);
+
     cflags.appendSliceAssumeCapacity(&.{
         "-std=c2y",
         // Disable strict aliasing;
@@ -629,6 +634,8 @@ pub fn build(b: *std.Build) !void {
         .upstream = upstream,
         .glibconfig_conf = glibconfig_conf,
         .glib_conf = glib_conf,
+        .include_dir = glib_includedir,
+        .charsetalias_dir = glib_libdir,
     });
 }
 

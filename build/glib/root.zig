@@ -20,6 +20,12 @@ const Config = struct {
     upstream: *std.Build.Dependency,
     glib_conf: *Step.ConfigHeader,
     glibconfig_conf: *Step.ConfigHeader,
+    include_dir: []const u8,
+    charsetalias_dir: []const u8,
+};
+
+const unix_headers: []const []const u8 = &.{
+    "glib-unix.h",
 };
 
 // Linux, Windows, MacOs, Freebsd, Netbsd and Openbsd can spawn
@@ -32,18 +38,15 @@ pub fn build(b: *std.Build, config: Config) !void {
     const glibconfig_conf = config.glibconfig_conf;
     const target = config.target;
     const rt = target.result;
-
-    const unix_headers: []const []const u8 = &.{
-        "glib-unix.h",
-    };
-
+    const include_dir = config.include_dir;
+    const sub_include_dir = b.fmt("{s}/glib", .{include_dir});
+    _ = sub_include_dir; // autofix
     const unix_source: []const []const u8 = &.{
         "glib-unix.c",
         "giounix.c",
         if (rt.os.tag == .linux) "gjournal-private.c" else "",
         if (can_spawn) "gspawn-posix.c" else "gspawn-unsupported.c",
     };
-    _ = unix_source; // autofix
     const windows_headers: []const []const u8 = &.{
         "gwin32.h",
     };
@@ -85,13 +88,8 @@ pub fn build(b: *std.Build, config: Config) !void {
         break :blk visibility_macros;
     };
 
-    const glib_mod = b.createModule(.{
-        .link_libc = true,
-        .optimize = config.optimize,
-        .target = target,
-    });
-
-    var include_paths: std.ArrayList(std.Build.LazyPath) = try .initCapacity(b.allocator, 10);
+    const charset = buildCharset(b, config);
+    var include_paths: std.ArrayList(std.Build.LazyPath) = try .initCapacity(b.allocator, 6);
     include_paths.appendSliceAssumeCapacity(&.{
         glib_conf.getOutputDir(),
         glibconfig_conf.getOutputDir(),
@@ -99,14 +97,15 @@ pub fn build(b: *std.Build, config: Config) !void {
         visibility_h.dirname().dirname(),
         upstream.path("."),
         upstream.path("glib"),
-        upstream.path("gobject"),
-        upstream.path("gmodule"),
-        upstream.path("gio"),
-        upstream.path("girepository"),
+    });
+
+    const glib_mod = b.createModule(.{
+        .link_libc = true,
+        .optimize = config.optimize,
+        .target = target,
     });
 
     for (include_paths.items) |path| glib_mod.addIncludePath(path);
-
     config.cflags.appendSliceAssumeCapacity(c_flags);
     glib_mod.addCSourceFiles(.{
         .root = upstream.path("glib"),
@@ -114,6 +113,13 @@ pub fn build(b: *std.Build, config: Config) !void {
         .language = .c,
         .flags = config.cflags.items,
     });
+    if (!rt.isMinGW()) glib_mod.addCSourceFiles(.{
+        .root = upstream.path("glib"),
+        .files = unix_source,
+        .language = .c,
+        .flags = config.cflags.items,
+    });
+    glib_mod.linkLibrary(charset);
 
     const glib = b.addLibrary(.{
         .name = "glib-2.0",
@@ -128,10 +134,44 @@ pub fn build(b: *std.Build, config: Config) !void {
         .upstream = upstream,
         .target = target,
         .includes = include_paths.items,
+        .cflags = config.cflags,
     });
     // b.installArtifact(glib);
     _ = unix_headers; // autofix
     _ = headers; // autofix
+}
+
+pub fn buildCharset(b: *std.Build, config: Config) *Step.Compile {
+    const charset_module = b.createModule(.{
+        .optimize = config.optimize,
+        .pic = true,
+        .target = config.target,
+        .link_libc = true,
+    });
+    const charset_dir = config.upstream.path("glib/libcharset");
+
+    var charset_cflags = config.cflags.clone(b.allocator) catch @panic("OOM");
+    defer charset_cflags.deinit(b.allocator);
+
+    charset_cflags.appendSliceAssumeCapacity(&.{
+        "-Wno-sign-conversion",
+        b.fmt("-DGLIB_CHARSETALIAS_DIR=\"{s}\"", .{config.charsetalias_dir}),
+    });
+    charset_module.addCSourceFiles(.{
+        .root = charset_dir,
+        .language = .c,
+        .files = &.{"localcharset.c"},
+        .flags = charset_cflags.items,
+    });
+    charset_module.addIncludePath(charset_dir);
+    charset_module.addConfigHeader(config.glib_conf);
+
+    const charset = b.addLibrary(.{
+        .name = "charset",
+        .root_module = charset_module,
+        .linkage = .static,
+    });
+    return charset;
 }
 
 const headers: []const []const u8 = &.{
