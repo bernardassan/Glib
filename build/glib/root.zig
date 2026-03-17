@@ -3,6 +3,7 @@ const Step = std.Build.Step;
 
 const platform = @import("../platform.zig");
 const is = platform.is;
+const tests = @import("tests.zig");
 
 const c_flags: []const []const u8 = &.{
     "-DGLIB_COMPILATION",
@@ -29,7 +30,8 @@ pub fn build(b: *std.Build, config: Config) !void {
     const upstream = config.upstream;
     const glib_conf = config.glib_conf;
     const glibconfig_conf = config.glibconfig_conf;
-    const rt = config.target.result;
+    const target = config.target;
+    const rt = target.result;
 
     const unix_headers: []const []const u8 = &.{
         "glib-unix.h",
@@ -86,19 +88,24 @@ pub fn build(b: *std.Build, config: Config) !void {
     const glib_mod = b.createModule(.{
         .link_libc = true,
         .optimize = config.optimize,
-        .target = config.target,
+        .target = target,
     });
 
-    glib_mod.addConfigHeader(glib_conf);
-    glib_mod.addConfigHeader(glibconfig_conf);
-    glib_mod.addIncludePath(version_macros_h.dirname().dirname());
-    glib_mod.addIncludePath(visibility_h.dirname().dirname());
-    glib_mod.addIncludePath(upstream.path("."));
-    glib_mod.addIncludePath(upstream.path("glib"));
-    glib_mod.addIncludePath(upstream.path("gobject"));
-    glib_mod.addIncludePath(upstream.path("gmodule"));
-    glib_mod.addIncludePath(upstream.path("gio"));
-    glib_mod.addIncludePath(upstream.path("girepository"));
+    var include_paths: std.ArrayList(std.Build.LazyPath) = try .initCapacity(b.allocator, 10);
+    include_paths.appendSliceAssumeCapacity(&.{
+        glib_conf.getOutputDir(),
+        glibconfig_conf.getOutputDir(),
+        version_macros_h.dirname().dirname(),
+        visibility_h.dirname().dirname(),
+        upstream.path("."),
+        upstream.path("glib"),
+        upstream.path("gobject"),
+        upstream.path("gmodule"),
+        upstream.path("gio"),
+        upstream.path("girepository"),
+    });
+
+    for (include_paths.items) |path| glib_mod.addIncludePath(path);
 
     config.cflags.appendSliceAssumeCapacity(c_flags);
     glib_mod.addCSourceFiles(.{
@@ -116,10 +123,17 @@ pub fn build(b: *std.Build, config: Config) !void {
         .version = config.library_version,
     });
 
-    b.installArtifact(glib);
+    try tests.build(b, .{
+        .glib = glib,
+        .upstream = upstream,
+        .target = target,
+        .includes = include_paths.items,
+    });
+    // b.installArtifact(glib);
     _ = unix_headers; // autofix
     _ = headers; // autofix
 }
+
 const headers: []const []const u8 = &.{
     "glib.h",
     "glib-object.h",
