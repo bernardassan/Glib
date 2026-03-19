@@ -9,14 +9,13 @@ const Config = struct {
     cflags: *std.ArrayList([]const u8),
 };
 
+const sub_dir = "glib/tests";
 pub fn build(
     b: *std.Build,
     config: Config,
 ) !void {
-    const target = config.target;
-    const glib = config.glib;
+    const extra_test: std.StaticStringMap([]const []const u8) = .initComptime(extra_tests);
     const upstream = config.upstream;
-    const sub_dir = "glib/tests";
 
     var tests_cflags = config.cflags.clone(b.allocator) catch @panic("OOM");
     defer tests_cflags.deinit(b.allocator);
@@ -26,69 +25,96 @@ pub fn build(
         "-UG_DISABLE_ASSERT",
     });
 
-    for (tests) |value| {
-        const module = b.createModule(.{
-            .target = target,
-            .optimize = .Debug,
-        });
-        module.addCSourceFile(.{
-            .file = upstream.path(b.fmt("{s}/{s}.c", .{ sub_dir, value })),
-            .language = .c,
-            .flags = tests_cflags.items,
-        });
-        for (config.includes) |path| module.addIncludePath(path);
-        module.linkLibrary(glib);
-
-        const test_exe = b.addExecutable(.{
-            .name = value,
-            .root_module = module,
-        });
+    for (tests) |name| {
+        const test_exe = buildTest(b, config, name, config.glib, tests_cflags.items);
 
         const run_test = b.addRunArtifact(test_exe);
+        if (std.mem.eql(u8, name, "mapping")) run_test.setCwd(test_exe.getEmittedBinDirectory());
         run_test.expectExitCode(0);
 
         b.getInstallStep().dependOn(&run_test.step);
     }
+
+    for (extra_test.keys(), extra_test.values()) |name, inputs| {
+        const test_exe = buildTest(b, config, name, config.glib, tests_cflags.items);
+        {}
+        const container = b.addWriteFiles();
+        const exe_file = container.addCopyFile(test_exe.getEmittedBin(), name);
+        switch (inputs[0][inputs[0].len - 1]) {
+            '/' => for (inputs) |input| {
+                _ = container.addCopyDirectory(upstream.path(b.fmt("{s}/{s}", .{ sub_dir, input })), input, .{});
+            },
+            else => for (inputs) |input| {
+                _ = container.addCopyFile(upstream.path(b.fmt("{s}/{s}", .{ sub_dir, input })), input);
+            },
+        }
+        const run = Step.Run.create(b, b.fmt("run {s}", .{name}));
+        run.addFileArg(exe_file);
+        run.expectExitCode(0);
+        b.getInstallStep().dependOn(&run.step);
+    }
+}
+
+fn buildTest(
+    b: *std.Build,
+    config: Config,
+    name: []const u8,
+    glib: *Step.Compile,
+    flags: []const []const u8,
+) *Step.Compile {
+    const module = b.createModule(.{
+        .target = config.target,
+        .optimize = .Debug,
+        .link_libc = true,
+        .sanitize_c = .off,
+    });
+    module.addCSourceFile(.{
+        .file = config.upstream.path(b.fmt("{s}/{s}.c", .{ sub_dir, name })),
+        .language = .c,
+        .flags = flags,
+    });
+    for (config.includes) |path| module.addIncludePath(path);
+    module.linkLibrary(glib);
+
+    const test_exe = b.addExecutable(.{
+        .name = name,
+        .root_module = module,
+    });
+    return test_exe;
 }
 
 const tests: []const []const u8 = &.{
     "array-test",
     "asyncqueue",
     "base64",
-    // "bitlock",
-    // "bookmarkfile",
+    "bitlock",
     "bytes",
-    // "cache",
+    "cache",
     "charset",
     "checksum",
-    // "completion",
-    // "cond",
+    "completion",
+    "cond",
     "dataset",
     "dir",
     "environment",
     "error",
-    // "fileutils",
     "guuid",
     "hash",
     "hmac",
     "hook",
     "hostutils",
     "io-channel-basic",
-    // "io-channel",
-    // "keyfile",
     "list",
     "logging",
     "mainloop",
-    // "mappedfile",
     // "mapping",
     "markup",
-    // "markup-parse",
     "markup-collect",
     "markup-escape",
     "markup-subparser",
-    // "memchunk",
+    "memchunk",
     "monotonic-time",
-    // "mutex",
+    "mutex",
     "node",
     "once",
     "onceinit",
@@ -96,7 +122,7 @@ const tests: []const []const u8 = &.{
     "overflow",
     "pathbuf",
     "pattern",
-    // "private",
+    "private",
     "protocol",
     "queue",
     "rand",
@@ -104,19 +130,19 @@ const tests: []const []const u8 = &.{
     "rec-mutex",
     "refcount",
     "refstring",
-    // "relation",
+    "relation",
     "rwlock",
     "scannerapi",
     "search-utils",
     "shell",
-    // "slice",
+    "slice",
     "slist",
     "sort",
     "strfuncs",
     "strvbuilder",
     "test-printf",
     "thread",
-    // "thread-deprecated",
+    "thread-deprecated",
     "thread-pool",
     "timeout",
     "timer",
@@ -128,9 +154,18 @@ const tests: []const []const u8 = &.{
     "utf8-misc",
     "utils-isolated",
     "utils-unisolated",
-    // "unicode",
-    // "unicode-encoding",
-    // "unicode-normalize",
     "uri",
     "1bit-mutex",
+};
+
+const extra_tests: []const struct { []const u8, []const []const u8 } = &.{
+    .{ "bookmarkfile", &.{"bookmarks/"} },
+    .{ "fileutils", &.{"4096-random-bytes"} },
+    .{ "io-channel", &.{"iochannel-test-infile"} },
+    .{ "keyfile", &.{ "keyfiletest.ini", "keyfile.c", "pages.ini" } },
+    .{ "mappedfile", &.{ "empty", "4096-random-bytes" } },
+    .{ "markup-parse", &.{"markups/"} },
+    .{ "unicode", &.{ "casemap.txt", "casefold.txt" } },
+    .{ "unicode-encoding", &.{"utf8.txt"} },
+    .{ "unicode-normalize", &.{"NormalizationTest.txt"} },
 };

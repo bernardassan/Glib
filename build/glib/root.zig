@@ -5,11 +5,6 @@ const platform = @import("../platform.zig");
 const is = platform.is;
 const tests = @import("tests.zig");
 
-const c_flags: []const []const u8 = &.{
-    "-DGLIB_COMPILATION",
-    "-DG_LOG_DOMAIN=\"GLib\"",
-};
-
 const Config = struct {
     version: std.SemanticVersion,
     library_version: std.SemanticVersion,
@@ -22,10 +17,6 @@ const Config = struct {
     glibconfig_conf: *Step.ConfigHeader,
     include_dir: []const u8,
     charsetalias_dir: []const u8,
-};
-
-const unix_headers: []const []const u8 = &.{
-    "glib-unix.h",
 };
 
 // Linux, Windows, MacOs, Freebsd, Netbsd and Openbsd can spawn
@@ -41,16 +32,6 @@ pub fn build(b: *std.Build, config: Config) !void {
     const include_dir = config.include_dir;
     const sub_include_dir = b.fmt("{s}/glib", .{include_dir});
     _ = sub_include_dir; // autofix
-    const unix_source: []const []const u8 = &.{
-        "glib-unix.c",
-        "giounix.c",
-        if (rt.os.tag == .linux) "gjournal-private.c" else "",
-        if (can_spawn) "gspawn-posix.c" else "gspawn-unsupported.c",
-    };
-    const windows_headers: []const []const u8 = &.{
-        "gwin32.h",
-    };
-    _ = windows_headers; // autofix
 
     const gen_macros = b.addExecutable(.{
         .linkage = .static,
@@ -60,8 +41,6 @@ pub fn build(b: *std.Build, config: Config) !void {
             .optimize = .Debug,
             .target = b.graph.host,
         }),
-        .use_lld = false,
-        .use_llvm = false,
     });
 
     const version = b.fmt("{f}", .{config.version});
@@ -100,22 +79,35 @@ pub fn build(b: *std.Build, config: Config) !void {
     });
 
     const glib_mod = b.createModule(.{
-        .link_libc = true,
         .optimize = config.optimize,
         .target = target,
+        .link_libc = true,
+        .sanitize_c = .off,
     });
 
     for (include_paths.items) |path| glib_mod.addIncludePath(path);
     config.cflags.appendSliceAssumeCapacity(c_flags);
     glib_mod.addCSourceFiles(.{
         .root = upstream.path("glib"),
-        .files = glib_sources,
+        .files = sources,
+        .language = .c,
+        .flags = config.cflags.items,
+    });
+    glib_mod.addCSourceFiles(.{
+        .root = upstream.path("glib"),
+        .files = deprecated_sources,
         .language = .c,
         .flags = config.cflags.items,
     });
     if (!rt.isMinGW()) glib_mod.addCSourceFiles(.{
         .root = upstream.path("glib"),
         .files = unix_source,
+        .language = .c,
+        .flags = config.cflags.items,
+    });
+    if (rt.os.tag == .linux) glib_mod.addCSourceFiles(.{
+        .root = upstream.path("glib"),
+        .files = linux_source,
         .language = .c,
         .flags = config.cflags.items,
     });
@@ -147,6 +139,7 @@ pub fn buildCharset(b: *std.Build, config: Config) *Step.Compile {
         .pic = true,
         .target = config.target,
         .link_libc = true,
+        .sanitize_c = .off,
     });
     const charset_dir = config.upstream.path("glib/libcharset");
 
@@ -173,6 +166,53 @@ pub fn buildCharset(b: *std.Build, config: Config) *Step.Compile {
     });
     return charset;
 }
+
+const c_flags: []const []const u8 = &.{
+    "-DGLIB_COMPILATION",
+    "-DG_LOG_DOMAIN=\"GLib\"",
+};
+
+const windows_headers: []const []const u8 = &.{
+    "gwin32.h",
+};
+
+const windows_sources: []const []const u8 = &.{
+    "gwin32.c",
+    "gspawn-win32.c",
+    "giowin32.c",
+    "dirent/wdirent.c",
+};
+
+const unix_headers: []const []const u8 = &.{
+    "glib-unix.h",
+};
+
+const linux_source: []const []const u8 = &.{
+    "gjournal-private.c",
+};
+
+const unix_source: []const []const u8 = &.{
+    "glib-unix.c",
+    "giounix.c",
+    if (can_spawn) "gspawn-posix.c" else "gspawn-unsupported.c",
+};
+
+const deprecated_headers: []const []const u8 = &.{
+    "deprecated/gallocator.h",
+    "deprecated/gcache.h",
+    "deprecated/gcompletion.h",
+    "deprecated/gmain.h",
+    "deprecated/grel.h",
+    "deprecated/gthread.h",
+};
+
+const deprecated_sources: []const []const u8 = &.{
+    "deprecated/gallocator.c",
+    "deprecated/gcache.c",
+    "deprecated/gcompletion.c",
+    "deprecated/grel.c",
+    "deprecated/gthread-deprecated.c",
+};
 
 const headers: []const []const u8 = &.{
     "glib.h",
@@ -260,7 +300,7 @@ const sub_headers: []const []const u8 = &.{
     "gprintf.h",
 };
 
-const glib_sources: []const []const u8 = &.{
+const sources: []const []const u8 = &.{
     "garcbox.c",
     "garray.c",
     "gasyncqueue.c",
