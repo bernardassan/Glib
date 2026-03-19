@@ -10,6 +10,7 @@ const Config = struct {
 };
 
 const sub_dir = "glib/tests";
+
 pub fn build(
     b: *std.Build,
     config: Config,
@@ -86,19 +87,30 @@ fn buildTest(
 const tests: []const []const u8 = &.{
     "array-test",
     "asyncqueue",
+    "atomic",
     "base64",
     "bitlock",
     "bytes",
     "cache",
     "charset",
     "checksum",
+    // FIXME: can fail on musl https://wiki.musl-libc.org/roadmap#Open_future_goals
+    "collate",
     "completion",
     "cond",
+    // FIXME: can fail on musl https://gitlab.gnome.org/GNOME/glib/-/issues/3182
+    "convert",
     "dataset",
+    // FIXME: can fail on musl and darwin
+    // FIXME: darwin: https://gitlab.gnome.org/GNOME/glib/-/issues/1392
+    // https://www.openwall.com/lists/musl/2023/08/10/3
+    // FIXME: musl: https://gitlab.gnome.org/GNOME/glib/-/issues/3171
+    "date",
     "dir",
     "environment",
     "error",
     "guuid",
+    "gvariant",
     "hash",
     "hmac",
     "hook",
@@ -106,22 +118,29 @@ const tests: []const []const u8 = &.{
     "io-channel-basic",
     "list",
     "logging",
+    "macros",
     "mainloop",
     // "mapping",
     "markup",
     "markup-collect",
     "markup-escape",
     "markup-subparser",
+    "max-version",
     "memchunk",
+    "mem-overflow",
     "monotonic-time",
     "mutex",
     "node",
     "once",
     "onceinit",
+    // can fail on musl https://www.openwall.com/lists/musl/2023/08/10/3
+    "option-context",
     "option-argv0",
     "overflow",
     "pathbuf",
     "pattern",
+    // can fail on windows
+    "print",
     "private",
     "protocol",
     "queue",
@@ -134,28 +153,35 @@ const tests: []const []const u8 = &.{
     "rwlock",
     "scannerapi",
     "search-utils",
+    "sequence",
     "shell",
     "slice",
     "slist",
     "sort",
     "strfuncs",
+    "string",
     "strvbuilder",
+    "testing-nonfatal",
     "test-printf",
     "thread",
     "thread-deprecated",
     "thread-pool",
+    "thread-pool-slow",
     "timeout",
     "timer",
     "tree",
     "types",
     "utf8-performance",
+    "utf8-pointer",
     "utf8-private",
     "utf8-validate",
     "utf8-misc",
+    "utils",
     "utils-isolated",
     "utils-unisolated",
     "uri",
     "1bit-mutex",
+    "642026",
 };
 
 const extra_tests: []const struct { []const u8, []const []const u8 } = &.{
