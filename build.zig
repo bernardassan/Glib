@@ -18,24 +18,46 @@ const Cstd = enum { gnu99, c99, c11, c17, c23 };
 const Feature = enum { enabled, disabled, auto };
 const MonitorBackend = enum { auto, inotify, kqueue, @"libinotify-kqueue", win32 };
 
-// TODO: verify all quoted configs are quoted as necessary
 pub fn build(b: *std.Build) !void {
-    const optimize = b.standardOptimizeOption(.{});
-    const target = b.standardTargetOptions(.{});
+    const target = blk: {
+        var query = b.standardTargetOptionsQueryOnly(.{});
+        // Zig sets min glibc to 2.31 but >= 2.38 is required for `strlcpy`,
+        // `strlcat` and `close_range` https://codeberg.org/ziglang/zig/src/commit/3c8b96df6d146e6ae820f58ec993510d1eedf2c0/lib/std/Target.zig#L469
+        // But because I use the glibc 2.43 source for setting up `platform.zig`
+        // set the `glibc_version` to that
+        const min_glibc: std.SemanticVersion = .{ .major = 2, .minor = 43, .patch = 0 };
+        if (query.abi == .gnu) {
+            if (query.glibc_version) |glibc_version| {
+                switch (min_glibc.order(glibc_version)) {
+                    .gt => query.glibc_version = min_glibc,
+                    else => {},
+                }
+            } else query.glibc_version = min_glibc;
+        }
+        break :blk b.resolveTargetQuery(query);
+    };
     const rt = target.result;
-
     switch (rt.os.tag) {
         .windows, .macos, .linux, .freebsd, .netbsd, .openbsd => {},
         else => @panic("Os not supported. Contributions are welcome"),
     }
+    const optimize = b.standardOptimizeOption(.{});
 
     // we only support systems where short is 2 bytes and int 4 bytes
     debug.assert(rt.cTypeByteSize(.short) == 2);
     debug.assert(rt.cTypeByteSize(.int) == 4);
 
-    const upstream = b.dependency("glib2", .{});
-
     const linkage = b.option(std.builtin.LinkMode, "linkage", "linkage mode for library") orelse .static;
+
+    const upstream = b.dependency("glib2", .{});
+    const pcre2_dep = b.dependency("pcre2", .{
+        .target = target,
+        .optimize = optimize,
+        .linkage = linkage,
+        .@"code-unit-width" = 8,
+    });
+    const libpcre2 = pcre2_dep.artifact("pcre2-8");
+    const pcre2_h = pcre2_dep.namedLazyPath("pcre2.h");
 
     const selinux = b.option(Feature, "selinux", "build with selinux support") orelse .auto;
     _ = selinux; // autofix
@@ -152,7 +174,6 @@ pub fn build(b: *std.Build) !void {
         "-D_XOPEN_SOURCE=800",
         "-Wall",
         "-Wextra",
-        "-Wduplicated-branches",
         "-Wfloat-conversion",
         "-Wimplicit-fallthrough",
         "-Wmisleading-indentation",
@@ -397,7 +418,15 @@ pub fn build(b: *std.Build) !void {
             .G_INTL_STATIC_COMPILATION = 1,
             .FFI_STATIC_BUILD = 1,
         }),
-        else => {},
+        else => glibconfig_conf.addValues(.{
+            .GLIB_STATIC_COMPILATION = 0,
+            .GOBJECT_STATIC_COMPILATION = 0,
+            .GIO_STATIC_COMPILATION = 0,
+            .GMODULE_STATIC_COMPILATION = 0,
+            .GI_STATIC_COMPILATION = 0,
+            .G_INTL_STATIC_COMPILATION = 0,
+            .FFI_STATIC_BUILD = 0,
+        }),
     }
 
     const glib_conf = b.addConfigHeader(.{
@@ -636,6 +665,10 @@ pub fn build(b: *std.Build) !void {
         .glib_conf = glib_conf,
         .include_dir = glib_includedir,
         .charsetalias_dir = glib_libdir,
+        .pcre2 = .{
+            .lib = libpcre2,
+            .header = pcre2_h,
+        },
     });
 }
 

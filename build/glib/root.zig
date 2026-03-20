@@ -17,6 +17,10 @@ const Config = struct {
     glibconfig_conf: *Step.ConfigHeader,
     include_dir: []const u8,
     charsetalias_dir: []const u8,
+    pcre2: struct {
+        lib: *Step.Compile,
+        header: std.Build.LazyPath,
+    },
 };
 
 // Linux, Windows, MacOs, Freebsd, Netbsd and Openbsd can spawn
@@ -30,6 +34,7 @@ pub fn build(b: *std.Build, config: Config) !void {
     const target = config.target;
     const rt = target.result;
     const include_dir = config.include_dir;
+    const pcre2 = config.pcre2;
     const sub_include_dir = b.fmt("{s}/glib", .{include_dir});
     _ = sub_include_dir; // autofix
 
@@ -85,8 +90,11 @@ pub fn build(b: *std.Build, config: Config) !void {
         .sanitize_c = .off,
     });
 
+    glib_mod.addIncludePath(pcre2.header);
     for (include_paths.items) |path| glib_mod.addIncludePath(path);
+
     config.cflags.appendSliceAssumeCapacity(c_flags);
+
     glib_mod.addCSourceFiles(.{
         .root = upstream.path("glib"),
         .files = sources,
@@ -112,6 +120,7 @@ pub fn build(b: *std.Build, config: Config) !void {
         .flags = config.cflags.items,
     });
     glib_mod.linkLibrary(charset);
+    glib_mod.linkLibrary(pcre2.lib);
 
     const glib = b.addLibrary(.{
         .name = "glib-2.0",
