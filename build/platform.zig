@@ -580,7 +580,7 @@ pub const functions = struct {
     };
 };
 
-const Platform = enum {
+pub const Platform = enum {
     unix,
     musl,
     gnu,
