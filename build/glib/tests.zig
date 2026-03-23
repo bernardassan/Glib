@@ -70,8 +70,22 @@ fn buildTest(
     for (simple_test) |name| {
         const test_exe = compileTest(b, config, name, config.glib, tests_cflags);
 
+        // TODO: The mapping test requres an absolute directory to itself
+        // to be able to respawn its child after it has changed into the tmp
+        // directory The below approach feels hacky and brittle find a better
+        // way to get an absolute directory to the test `mapping` binary
+        if (std.mem.eql(u8, name, "mapping")) {
+            const mapping = Step.Run.create(b, b.fmt("run {s}", .{name}));
+            var abs_cwd: [128]u8 = undefined;
+            const size = b.build_root.handle.realPath(b.graph.io, &abs_cwd) catch unreachable;
+            abs_cwd[size] = '/';
+            mapping.addPrefixedFileArg(abs_cwd[0 .. size + 1], test_exe.getEmittedBin());
+
+            mapping.expectExitCode(0);
+            b.getInstallStep().dependOn(&mapping.step);
+            continue;
+        }
         const run_test = b.addRunArtifact(test_exe);
-        if (std.mem.eql(u8, name, "mapping")) run_test.setCwd(test_exe.getEmittedBinDirectory());
         run_test.expectExitCode(0);
 
         b.getInstallStep().dependOn(&run_test.step);
@@ -203,7 +217,7 @@ const tests = struct {
         "logging",
         "macros",
         "mainloop",
-        // "mapping",
+        "mapping",
         "markup",
         "markup-collect",
         "markup-escape",
