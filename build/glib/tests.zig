@@ -24,28 +24,30 @@ pub fn build(
         []const Platform,
         []const String,
     }) = .initComptime(tests.failable_extra);
-    const source_test: std.StaticStringMap(tests.SourceInfo) = .initComptime(tests.source);
+    const source_tests: std.StaticStringMap(tests.SourceInfo) = .initComptime(tests.sources);
 
-    var tests_cflags = config.cflags.clone(b.allocator) catch @panic("OOM");
-    defer tests_cflags.deinit(b.allocator);
-
+    var tests_cflags = config.cflags;
     tests_cflags.appendSliceAssumeCapacity(&.{
         "-DG_LOG_DOMAIN=\"GLib\"",
         "-UG_DISABLE_ASSERT",
     });
+    defer {
+        _ = tests_cflags.pop();
+        _ = tests_cflags.pop();
+    }
 
-    buildTest(b, config, tests.simple, &tests_cflags);
+    buildTest(b, config, tests.simple, tests_cflags);
 
-    buildFailableTest(b, config, failable_tests, &tests_cflags);
+    buildFailableTest(b, config, failable_tests, tests_cflags);
 
     buildExtraTest(b, config, .{
         .names = extra_tests.keys(),
         .inputs = extra_tests.values(),
-    }, &tests_cflags);
+    }, tests_cflags);
 
-    buildFailableExtraTest(b, config, failable_extra_tests, &tests_cflags);
+    buildFailableExtraTest(b, config, failable_extra_tests, tests_cflags);
 
-    buildSourcesTest(b, config, source_test, &tests_cflags);
+    buildSourcesTest(b, config, source_tests, tests_cflags);
 }
 
 fn buildFailableTest(
@@ -377,7 +379,6 @@ const tests = struct {
     } = &.{
         .{ "markup-parse", .{ &.{.musl}, &.{"markups/"} } },
         // TODO: test to see if it actually fails on mingw
-        // FIXME: Get test passing
         .{ "gdatetime", .{ &.{ .musl, .mingw }, &.{"time-zones/"} } },
     };
 
@@ -387,7 +388,7 @@ const tests = struct {
         sanitize: ?std.zig.SanitizeC,
         deps: []const root.Dependencies,
     };
-    const source: []const struct { String, SourceInfo } = &.{
+    const sources: []const struct { String, SourceInfo } = &.{
         .{
             "gwakeup",
             .{
