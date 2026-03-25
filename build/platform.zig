@@ -218,6 +218,10 @@ pub const struct_members = struct {
                 const define = struct_members.toDefine(b, member);
                 glib_conf.addValue(define, bool, true);
             };
+        if (rt.isMuslLibC()) for (struct_members.musl) |member| {
+            const define = struct_members.toDefine(b, member);
+            glib_conf.addValue(define, bool, true);
+        };
         if (rt.isMuslLibC() or rt.isGnuLibC()) for (struct_members.musl_glibc) |member| {
             const define = struct_members.toDefine(b, member);
             glib_conf.addValue(define, bool, true);
@@ -248,6 +252,10 @@ pub const struct_members = struct {
         "stat_st_ctimensec",
     };
 
+    pub const musl: []const []const u8 = &.{
+        "tm___tm_gmtoff", // glic has it only if _GNU_SOURCE isn't enabled
+    };
+
     // the glib support is on only few architectures
     // TODO: verify the glibc support for stat
     pub const musl_glibc_all_bsd: []const []const u8 = &.{
@@ -272,7 +280,6 @@ pub const struct_members = struct {
 
     pub const musl_glibc: []const []const u8 = &.{
         "statvfs_f_type",
-        "tm___tm_gmtoff",
     };
 
     // TODO: test darwin and free_bsd members as I'm not too sure

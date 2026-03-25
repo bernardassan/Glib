@@ -23,6 +23,11 @@ const Config = struct {
     },
 };
 
+pub const Dependencies = enum {
+    glib,
+    pcre2,
+};
+
 // Linux, Windows, MacOs, Freebsd, Netbsd and Openbsd can spawn
 const can_spawn = true;
 
@@ -73,7 +78,7 @@ pub fn build(b: *std.Build, config: Config) !void {
     };
 
     const charset = buildCharset(b, config);
-    var include_paths: std.ArrayList(std.Build.LazyPath) = try .initCapacity(b.allocator, 6);
+    var include_paths: std.ArrayList(std.Build.LazyPath) = try .initCapacity(b.allocator, 7);
     include_paths.appendSliceAssumeCapacity(&.{
         glib_conf.getOutputDir(),
         glibconfig_conf.getOutputDir(),
@@ -81,6 +86,7 @@ pub fn build(b: *std.Build, config: Config) !void {
         visibility_h.dirname().dirname(),
         upstream.path("."),
         upstream.path("glib"),
+        pcre2.header.dirname(),
     });
 
     const glib_mod = b.createModule(.{
@@ -90,7 +96,6 @@ pub fn build(b: *std.Build, config: Config) !void {
         .sanitize_c = .off,
     });
 
-    glib_mod.addIncludePath(pcre2.header);
     for (include_paths.items) |path| glib_mod.addIncludePath(path);
 
     config.cflags.appendSliceAssumeCapacity(c_flags);
@@ -130,8 +135,12 @@ pub fn build(b: *std.Build, config: Config) !void {
         .version = config.library_version,
     });
 
+    var dep_map: std.EnumArray(Dependencies, *Step.Compile) = .initUndefined();
+    dep_map.set(.glib, glib);
+    dep_map.set(.pcre2, pcre2.lib);
+
     try tests.build(b, .{
-        .glib = glib,
+        .deps = &dep_map,
         .upstream = upstream,
         .target = target,
         .includes = include_paths.items,

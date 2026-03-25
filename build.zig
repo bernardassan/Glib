@@ -54,6 +54,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
         .linkage = linkage,
+        .sanitize_c = .off,
         .@"code-unit-width" = 8,
     });
     const libpcre2 = pcre2_dep.artifact("pcre2-8");

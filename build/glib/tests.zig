@@ -3,17 +3,17 @@ const Step = std.Build.Step;
 
 const platform = @import("../platform.zig");
 const Platform = platform.Platform;
+const root = @import("root.zig");
 
 const Config = struct {
     target: std.Build.ResolvedTarget,
     upstream: *std.Build.Dependency,
-    glib: *Step.Compile,
+    deps: *std.EnumArray(root.Dependencies, *Step.Compile),
     includes: []const std.Build.LazyPath,
     cflags: *std.ArrayList(String),
 };
 
 const sub_dir = "glib/tests";
-
 pub fn build(
     b: *std.Build,
     config: Config,
@@ -24,6 +24,7 @@ pub fn build(
         []const Platform,
         []const String,
     }) = .initComptime(tests.failable_extra);
+    const source_test: std.StaticStringMap(tests.SourceInfo) = .initComptime(tests.source);
 
     var tests_cflags = config.cflags.clone(b.allocator) catch @panic("OOM");
     defer tests_cflags.deinit(b.allocator);
@@ -43,6 +44,8 @@ pub fn build(
     }, &tests_cflags);
 
     buildFailableExtraTest(b, config, failable_extra_tests, &tests_cflags);
+
+    buildSourcesTest(b, config, source_test, &tests_cflags);
 }
 
 fn buildFailableTest(
@@ -68,26 +71,25 @@ fn buildTest(
     tests_cflags: *const std.ArrayList(String),
 ) void {
     for (simple_test) |name| {
-        const test_exe = compileTest(b, config, name, config.glib, tests_cflags);
+        const test_exe = compileTest(b, config, name, tests_cflags);
 
-        // TODO: The mapping test requres an absolute directory to itself
-        // to be able to respawn its child after it has changed into the tmp
-        // directory The below approach feels hacky and brittle find a better
-        // way to get an absolute directory to the test `mapping` binary
-        if (std.mem.eql(u8, name, "mapping")) {
-            const mapping = Step.Run.create(b, b.fmt("run {s}", .{name}));
+        const run_test = Step.Run.create(b, b.fmt("run {s}", .{name}));
+        if (!std.mem.eql(u8, name, "mapping")) {
+            run_test.addArtifactArg(test_exe);
+        } else {
+            // TODO: maybe precompute the cwd so its done once for the whole
+            // build instead of once here and again in `buildExtraTest`
+            // TODO: The mapping test requres an absolute directory to itself
+            // to be able to respawn its child after it has changed into the tmp
+            // directory The below approach feels hacky and brittle find a
+            // better way to get an absolute directory to the test `mapping`
+            // binary
             var abs_cwd: [128]u8 = undefined;
             const size = b.build_root.handle.realPath(b.graph.io, &abs_cwd) catch unreachable;
             abs_cwd[size] = '/';
-            mapping.addPrefixedFileArg(abs_cwd[0 .. size + 1], test_exe.getEmittedBin());
-
-            mapping.expectExitCode(0);
-            b.getInstallStep().dependOn(&mapping.step);
-            continue;
+            run_test.addPrefixedFileArg(abs_cwd[0 .. size + 1], test_exe.getEmittedBin());
         }
-        const run_test = b.addRunArtifact(test_exe);
         run_test.expectExitCode(0);
-
         b.getInstallStep().dependOn(&run_test.step);
     }
 }
@@ -115,6 +117,20 @@ fn buildFailableExtraTest(
     }
 }
 
+fn buildSourcesTest(
+    b: *std.Build,
+    config: Config,
+    source_tests: std.StaticStringMap(tests.SourceInfo),
+    tests_cflags: *std.ArrayList(String),
+) void {
+    for (source_tests.keys(), source_tests.values()) |name, source| {
+        const test_exe = compileSourceTest(b, config, name, source, tests_cflags);
+        const run_test = b.addRunArtifact(test_exe);
+        run_test.expectExitCode(0);
+        b.getInstallStep().dependOn(&run_test.step);
+    }
+}
+
 fn buildExtraTest(
     b: *std.Build,
     config: Config,
@@ -125,7 +141,7 @@ fn buildExtraTest(
     tests_cflags: *const std.ArrayList(String),
 ) void {
     for (extra_tests.names, extra_tests.inputs) |name, inputs| {
-        const test_exe = compileTest(b, config, name, config.glib, tests_cflags);
+        const test_exe = compileTest(b, config, name, tests_cflags);
         {}
         const container = b.addWriteFiles();
         const exe_file = container.addCopyFile(test_exe.getEmittedBin(), name);
@@ -137,10 +153,22 @@ fn buildExtraTest(
                 _ = container.addCopyFile(config.upstream.path(b.fmt("{s}/{s}", .{ sub_dir, input })), input);
             },
         }
-        const run = Step.Run.create(b, b.fmt("run {s}", .{name}));
-        run.addFileArg(exe_file);
-        run.expectExitCode(0);
-        b.getInstallStep().dependOn(&run.step);
+
+        const run_test = Step.Run.create(b, b.fmt("run {s}", .{name}));
+        if (!std.mem.eql(u8, name, "gdatetime")) {
+            run_test.addFileArg(exe_file);
+        } else {
+            // gdatetime requires an absolute path to location of timezone input
+            // or exe with timezone directory nested in it. Don't use the
+            // `env G_TEST_SRCDIR=config.upstream.path(sub_dir) ./exe_file`
+            // approach as that is too platform specific
+            var abs_cwd: [128]u8 = undefined;
+            const size = b.build_root.handle.realPath(b.graph.io, &abs_cwd) catch unreachable;
+            abs_cwd[size] = '/';
+            run_test.addPrefixedFileArg(abs_cwd[0 .. size + 1], exe_file);
+        }
+        run_test.expectExitCode(0);
+        b.getInstallStep().dependOn(&run_test.step);
     }
 }
 
@@ -159,25 +187,61 @@ fn skipPlatform(rt: std.Target, platforms: []const Platform) !void {
     }
 }
 
+fn compileSourceTest(
+    b: *std.Build,
+    config: Config,
+    name: String,
+    source: tests.SourceInfo,
+    flags: *std.ArrayList(String),
+) *Step.Compile {
+    const module = b.createModule(.{
+        .target = config.target,
+        .optimize = .Debug,
+        .link_libc = true,
+    });
+
+    if (source.c_args) |c_args| flags.appendAssumeCapacity(c_args);
+    defer if (source.c_args) |_| {
+        _ = flags.pop();
+    };
+    module.addCSourceFile(.{
+        .file = config.upstream.path(b.fmt("{s}/{s}", .{ sub_dir, source.source })),
+        .language = .c,
+        .flags = flags.items,
+    });
+    module.sanitize_c = source.sanitize;
+    for (config.includes) |path| module.addIncludePath(path);
+    for (source.deps) |dep| {
+        const lib = config.deps.get(dep);
+        module.linkLibrary(lib);
+    }
+
+    const test_exe = b.addExecutable(.{
+        .name = name,
+        .root_module = module,
+    });
+    return test_exe;
+}
+
 fn compileTest(
     b: *std.Build,
     config: Config,
     name: String,
-    glib: *Step.Compile,
     flags: *const std.ArrayList(String),
 ) *Step.Compile {
     const module = b.createModule(.{
         .target = config.target,
         .optimize = .Debug,
         .link_libc = true,
-        .sanitize_c = .off,
     });
+
     module.addCSourceFile(.{
         .file = config.upstream.path(b.fmt("{s}/{s}.c", .{ sub_dir, name })),
         .language = .c,
         .flags = flags.items,
     });
     for (config.includes) |path| module.addIncludePath(path);
+    const glib = config.deps.get(.glib);
     module.linkLibrary(glib);
 
     const test_exe = b.addExecutable(.{
@@ -195,7 +259,6 @@ const tests = struct {
         "asyncqueue",
         "atomic",
         "base64",
-        "bitlock",
         "bytes",
         "cache",
         "charset",
@@ -234,8 +297,6 @@ const tests = struct {
         "overflow",
         "pathbuf",
         "pattern",
-        // can fail on windows
-        "print",
         "private",
         "protocol",
         "queue",
@@ -291,6 +352,9 @@ const tests = struct {
         .{ "date", &.{ .musl, .darwin } },
         // can fail on musl https://www.openwall.com/lists/musl/2023/08/10/3
         .{ "option-context", &.{.musl} },
+        // TODO: test to make sure it can indeed fail on windows
+        // can fail on windows
+        .{ "print", &.{.mingw} },
     };
 
     const extra: []const struct {
@@ -312,5 +376,82 @@ const tests = struct {
         struct { []const Platform, []const String },
     } = &.{
         .{ "markup-parse", .{ &.{.musl}, &.{"markups/"} } },
+        // TODO: test to see if it actually fails on mingw
+        // FIXME: Get test passing
+        .{ "gdatetime", .{ &.{ .musl, .mingw }, &.{"time-zones/"} } },
+    };
+
+    const SourceInfo = struct {
+        source: String,
+        c_args: ?String,
+        sanitize: ?std.zig.SanitizeC,
+        deps: []const root.Dependencies,
+    };
+    const source: []const struct { String, SourceInfo } = &.{
+        .{
+            "gwakeup",
+            .{
+                .source = "gwakeuptest.c",
+                .c_args = null,
+                .sanitize = null,
+                .deps = &.{.glib},
+            },
+        },
+        .{
+            "regex",
+            .{
+                .source = "regex.c",
+                .sanitize = null,
+                // TODO: only add in static build and check if any issues without it
+                // .define = "PCRE2_STATIC",
+                .c_args = null,
+                .deps = &.{ .glib, .pcre2 },
+            },
+        },
+        .{
+            "overflow-fallback",
+            .{
+                .source = "overflow.c",
+                .sanitize = null,
+                .c_args = "-D_GLIB_TEST_OVERFLOW_FALLBACK",
+                .deps = &.{.glib},
+            },
+        },
+        .{
+            "refcount-macro",
+            .{
+                .source = "refcount.c",
+                .sanitize = null,
+                .c_args = "-DG_DISABLE_CHECKS",
+                .deps = &.{.glib},
+            },
+        },
+        .{
+            "1bit-emufutex",
+            .{
+                .source = "1bit-mutex.c",
+                .sanitize = null,
+                .c_args = "-DTEST_EMULATED_FUTEX",
+                .deps = &.{.glib},
+            },
+        },
+        .{
+            "642026-ec",
+            .{
+                .source = "642026.c",
+                .sanitize = null,
+                .c_args = "-DG_ERRORCHECK_MUTEXES",
+                .deps = &.{.glib},
+            },
+        },
+        .{
+            "bitlock",
+            .{
+                .source = "bitlock.c",
+                .sanitize = .off,
+                .c_args = null,
+                .deps = &.{.glib},
+            },
+        },
     };
 };
