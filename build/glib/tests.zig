@@ -11,7 +11,7 @@ const Config = struct {
     build_root: String,
     target: std.Build.ResolvedTarget,
     upstream: *std.Build.Dependency,
-    deps: *std.EnumArray(root.Dependencies, *Step.Compile),
+    deps: *std.EnumArray(root.Dependencies, root.Library),
     includes: []const std.Build.LazyPath,
     cflags: *std.ArrayList(String),
 };
@@ -124,7 +124,11 @@ fn buildSourcesTest(
     source_tests: std.StaticStringMap(tests.SourceInfo),
     tests_cflags: *std.ArrayList(String),
 ) void {
-    for (source_tests.keys(), source_tests.values()) |name, source| {
+    const rt = config.target.result;
+    start: for (source_tests.keys(), source_tests.values()) |name, source| {
+        if (source.skip) |skip| skipPlatform(rt, skip) catch |err| switch (err) {
+            error.Skip => continue :start,
+        };
         const test_exe_file = compileSourceTest(b, config, name, source, tests_cflags);
         const run_test = createRun(b, name);
         run_test.addPrefixedFileArg(config.build_root, test_exe_file);
@@ -213,10 +217,12 @@ fn compileSourceTest(
     // TODO: seems like a compiler error. Putting if and for doesn't execute else branch
     if (source.deps) |deps| {
         for (deps) |dep| {
-            const lib = config.deps.get(dep);
-            module.linkLibrary(lib);
+            switch (config.deps.get(dep)) {
+                .local => |lib| module.linkLibrary(lib),
+                .system => |sys_lib| module.linkSystemLibrary(sys_lib, .{}),
+            }
         }
-    } else module.linkLibrary(config.deps.get(.glib));
+    } else module.linkLibrary(config.deps.get(.glib).local);
 
     const test_exe = b.addExecutable(.{
         .name = name,
@@ -262,7 +268,7 @@ fn compileTest(
     });
     for (config.includes) |path| module.addIncludePath(path);
     const glib = config.deps.get(.glib);
-    module.linkLibrary(glib);
+    module.linkLibrary(glib.local);
 
     // TODO: this is only required for `spawn-path-search` test so having it
     // here feels inaffecient find a way around it
@@ -370,6 +376,7 @@ const tests = struct {
         "uri",
         "1bit-mutex",
         "642026",
+        "spawn-test",
     };
 
     const failable: []const struct { String, []const Platform } = &.{
@@ -420,6 +427,7 @@ const tests = struct {
         deps: ?[]const root.Dependencies,
         sub_programs: ?[]const String,
         input_file: ?String,
+        skip: ?[]const Platform,
     };
     const sources: []const struct { String, SourceInfo } = &.{
         .{
@@ -431,11 +439,10 @@ const tests = struct {
                 .deps = null,
                 .sub_programs = null,
                 .input_file = null,
+                .skip = null,
             },
         },
         .{
-            // FIXME: needs HAVE_EVENTFD which isn't supported on darwin,
-            // openbsd or mingw
             "gwakeup-fallback",
             .{
                 .source = "gwakeuptest.c",
@@ -444,6 +451,8 @@ const tests = struct {
                 .deps = null,
                 .sub_programs = null,
                 .input_file = null,
+                // these platforms don't have `eventfd`
+                .skip = &.{ .darwin, .openbsd, .mingw },
             },
         },
         .{
@@ -457,6 +466,7 @@ const tests = struct {
                 .deps = &.{ .glib, .pcre2 },
                 .sub_programs = null,
                 .input_file = null,
+                .skip = null,
             },
         },
         .{
@@ -468,6 +478,7 @@ const tests = struct {
                 .deps = null,
                 .sub_programs = null,
                 .input_file = null,
+                .skip = null,
             },
         },
         .{
@@ -479,6 +490,7 @@ const tests = struct {
                 .deps = null,
                 .sub_programs = null,
                 .input_file = null,
+                .skip = null,
             },
         },
         .{
@@ -490,6 +502,7 @@ const tests = struct {
                 .deps = null,
                 .sub_programs = null,
                 .input_file = null,
+                .skip = null,
             },
         },
         .{
@@ -501,6 +514,7 @@ const tests = struct {
                 .deps = null,
                 .sub_programs = null,
                 .input_file = null,
+                .skip = null,
             },
         },
         .{
@@ -512,14 +526,14 @@ const tests = struct {
                 .deps = null,
                 .sub_programs = null,
                 .input_file = null,
+                .skip = null,
             },
         },
         .{
-            // TODO: can potentially fail on windows check it out
             "spawn-multithreaded",
             .{
                 .source = "spawn-multithreaded.c",
-                .sanitize = .off,
+                .sanitize = null,
                 .c_args = null,
                 .deps = null,
                 .sub_programs = &.{
@@ -527,13 +541,14 @@ const tests = struct {
                     "test-spawn-sleep",
                 },
                 .input_file = null,
+                .skip = &.{.mingw},
             },
         },
         .{
             "spawn-path-search",
             .{
                 .source = "spawn-path-search.c",
-                .sanitize = .off,
+                .sanitize = null,
                 .c_args = null,
                 .deps = null,
                 .input_file = null,
@@ -542,50 +557,129 @@ const tests = struct {
                     "spawn-test-helper",
                     "path-test-subdir/spawn-test-helper",
                 },
+                .skip = null,
             },
         },
         .{
-            // TODO: can posibly fail on glibc verify this
             "spawn-singlethread",
             .{
                 .source = "spawn-singlethread.c",
-                .sanitize = .off,
+                .sanitize = null,
                 .c_args = null,
                 .deps = null,
                 .sub_programs = &.{
                     "test-spawn-echo",
                 },
                 .input_file = "echo-script",
+                .skip = &.{.mingw},
             },
         },
         .{
-            // TODO: can posibly fail on glibc verify this
-            "spawn-test",
+            "spawn-singlethread-win",
+            .{
+                .source = "spawn-singlethread.c",
+                .sanitize = null,
+                .c_args = null,
+                .deps = &.{.ws2_32},
+                .sub_programs = &.{
+                    "test-spawn-echo",
+                },
+                .input_file = "echo-script.bat",
+                .skip = &.{.unix},
+            },
+        },
+        .{
+            "spawn-test-win",
             .{
                 .source = "spawn-test.c",
-                .sanitize = .off,
+                .sanitize = null,
                 .c_args = null,
                 .deps = null,
-                .sub_programs = null,
-                // TODO: below is required for windows
-                // &.{
-                // "spawn-test-win32-gui",
-                // },
+                .sub_programs = &.{
+                    "spawn-test-win32-gui",
+                },
                 .input_file = null,
+                .skip = &.{.unix},
             },
         },
         .{
             "testing",
             .{
                 .source = "testing.c",
-                .sanitize = .off,
+                .sanitize = null,
                 .c_args = "",
                 .deps = null,
                 .sub_programs = &.{
                     "testing-helper",
                 },
                 .input_file = null,
+                .skip = null,
             },
         },
+        .{
+            "gpoll",
+            .{
+                .source = "gpoll.c",
+                .c_args = null,
+                .sanitize = null,
+                .deps = &.{ .glib, .ws2_32 },
+                .sub_programs = null,
+                .input_file = null,
+                .skip = &.{.unix},
+            },
+        },
+        .{
+            "win32",
+            .{
+                .source = "win32.c",
+                .c_args = null,
+                .sanitize = null,
+                .deps = &.{ .glib, .windowscodecs },
+                .sub_programs = null,
+                .input_file = null,
+                .skip = &.{.unix},
+            },
+        },
+        .{
+            "win32-private",
+            .{
+                .source = "win32-private.c",
+                .c_args = null,
+                .sanitize = null,
+                .deps = &.{ .glib, .ws2_32 },
+                .sub_programs = null,
+                .input_file = null,
+                .skip = &.{.unix},
+            },
+        },
+        .{
+            "include",
+            .{
+                .source = "include.c",
+                .c_args = null,
+                .sanitize = null,
+                .deps = null,
+                .sub_programs = null,
+                .input_file = null,
+                .skip = &.{.mingw},
+            },
+        },
+        .{
+            "unix",
+            .{
+                .source = "unix.c",
+                .c_args = null,
+                .sanitize = null,
+                .deps = null,
+                .sub_programs = null,
+                .input_file = null,
+                .skip = &.{.mingw},
+            },
+        },
+        // FIXME: mabye implement `gutils-user-database` and `constructor` which
+        // test dynamic symobl loading https://github.com/GNOME/glib/blob/f983e388431c59e31198874e87b92163423b7353/glib/tests/meson.build#L266
+        // https://github.com/GNOME/glib/blob/f983e388431c59e31198874e87b92163423b7353/glib/tests/meson.build#L374
+        // FIXME: Skip python tests for now `assert-msg-test.py` and
+        // `messages-low-memory.py`
     };
 };

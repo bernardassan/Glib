@@ -26,6 +26,13 @@ const Config = struct {
 pub const Dependencies = enum {
     glib,
     pcre2,
+    ws2_32,
+    windowscodecs,
+};
+
+pub const Library = union(enum) {
+    local: *Step.Compile,
+    system: []const u8,
 };
 
 // Linux, Windows, MacOs, Freebsd, Netbsd and Openbsd can spawn
@@ -135,9 +142,11 @@ pub fn build(b: *std.Build, config: Config) !void {
         .version = config.library_version,
     });
 
-    var dep_map: std.EnumArray(Dependencies, *Step.Compile) = .initUndefined();
-    dep_map.set(.glib, glib);
-    dep_map.set(.pcre2, pcre2.lib);
+    var dep_map: std.EnumArray(Dependencies, Library) = .initUndefined();
+    dep_map.set(.glib, .{ .local = glib });
+    dep_map.set(.pcre2, .{ .local = pcre2.lib });
+    dep_map.set(.ws2_32, .{ .system = "ws2_32" });
+    dep_map.set(.windowscodecs, .{ .system = "windowscodecs" });
 
     var abs_build_root: [128]u8 = undefined;
     const size = b.build_root.handle.realPath(b.graph.io, &abs_build_root) catch unreachable;
