@@ -1,5 +1,6 @@
 .{
     .name = .glib2,
+    .fingerprint = 0x44dabcf1881ea802,
     .version = "2.87.3",
     .minimum_zig_version = "0.16.0-dev.2296+fd3657bf8",
     .paths = .{
@@ -12,6 +13,9 @@
             .url = "https://github.com/GNOME/glib/archive/refs/tags/2.87.3.tar.gz",
             .hash = "N-V-__8AAKU0KQMunLzRshZbm1ufWgzgRURt7GbK_vUGaaEO",
         },
+        .pcre2 = .{
+            .url = "https://github.com/bernardassan/pcre2/archive/161bed58493d213807b438cdfa6a7c59799ee031.tar.gz",
+            .hash = "N-V-__8AAMIr4wAK_RXmm7e3YuZb7m1SkUTtnUJMpS81TDt3",
+        },
     },
-    .fingerprint = 0x44dabcf1881ea802,
 }
