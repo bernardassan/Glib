@@ -5,7 +5,10 @@ const platform = @import("../platform.zig");
 const Platform = platform.Platform;
 const root = @import("root.zig");
 
+const sub_dir = "glib/tests";
+
 const Config = struct {
+    build_root: String,
     target: std.Build.ResolvedTarget,
     upstream: *std.Build.Dependency,
     deps: *std.EnumArray(root.Dependencies, *Step.Compile),
@@ -13,7 +16,6 @@ const Config = struct {
     cflags: *std.ArrayList(String),
 };
 
-const sub_dir = "glib/tests";
 pub fn build(
     b: *std.Build,
     config: Config,
@@ -75,7 +77,7 @@ fn buildTest(
     for (simple_test) |name| {
         const test_exe = compileTest(b, config, name, tests_cflags);
 
-        const run_test = Step.Run.create(b, b.fmt("run {s}", .{name}));
+        const run_test = createRun(b, name);
         if (!std.mem.eql(u8, name, "mapping")) {
             run_test.addArtifactArg(test_exe);
         } else {
@@ -86,10 +88,7 @@ fn buildTest(
             // directory The below approach feels hacky and brittle find a
             // better way to get an absolute directory to the test `mapping`
             // binary
-            var abs_cwd: [128]u8 = undefined;
-            const size = b.build_root.handle.realPath(b.graph.io, &abs_cwd) catch unreachable;
-            abs_cwd[size] = '/';
-            run_test.addPrefixedFileArg(abs_cwd[0 .. size + 1], test_exe.getEmittedBin());
+            run_test.addPrefixedFileArg(config.build_root, test_exe.getEmittedBin());
         }
         run_test.expectExitCode(0);
         b.getInstallStep().dependOn(&run_test.step);
@@ -126,8 +125,9 @@ fn buildSourcesTest(
     tests_cflags: *std.ArrayList(String),
 ) void {
     for (source_tests.keys(), source_tests.values()) |name, source| {
-        const test_exe = compileSourceTest(b, config, name, source, tests_cflags);
-        const run_test = b.addRunArtifact(test_exe);
+        const test_exe_file = compileSourceTest(b, config, name, source, tests_cflags);
+        const run_test = createRun(b, name);
+        run_test.addPrefixedFileArg(config.build_root, test_exe_file);
         run_test.expectExitCode(0);
         b.getInstallStep().dependOn(&run_test.step);
     }
@@ -156,7 +156,7 @@ fn buildExtraTest(
             },
         }
 
-        const run_test = Step.Run.create(b, b.fmt("run {s}", .{name}));
+        const run_test = createRun(b, name);
         if (!std.mem.eql(u8, name, "gdatetime")) {
             run_test.addFileArg(exe_file);
         } else {
@@ -164,10 +164,7 @@ fn buildExtraTest(
             // or exe with timezone directory nested in it. Don't use the
             // `env G_TEST_SRCDIR=config.upstream.path(sub_dir) ./exe_file`
             // approach as that is too platform specific
-            var abs_cwd: [128]u8 = undefined;
-            const size = b.build_root.handle.realPath(b.graph.io, &abs_cwd) catch unreachable;
-            abs_cwd[size] = '/';
-            run_test.addPrefixedFileArg(abs_cwd[0 .. size + 1], exe_file);
+            run_test.addPrefixedFileArg(config.build_root, exe_file);
         }
         run_test.expectExitCode(0);
         b.getInstallStep().dependOn(&run_test.step);
@@ -195,7 +192,7 @@ fn compileSourceTest(
     name: String,
     source: tests.SourceInfo,
     flags: *std.ArrayList(String),
-) *Step.Compile {
+) std.Build.LazyPath {
     const module = b.createModule(.{
         .target = config.target,
         .optimize = .Debug,
@@ -213,16 +210,37 @@ fn compileSourceTest(
     });
     module.sanitize_c = source.sanitize;
     for (config.includes) |path| module.addIncludePath(path);
-    for (source.deps) |dep| {
-        const lib = config.deps.get(dep);
-        module.linkLibrary(lib);
-    }
+    // TODO: seems like a compiler error. Putting if and for doesn't execute else branch
+    if (source.deps) |deps| {
+        for (deps) |dep| {
+            const lib = config.deps.get(dep);
+            module.linkLibrary(lib);
+        }
+    } else module.linkLibrary(config.deps.get(.glib));
 
     const test_exe = b.addExecutable(.{
         .name = name,
         .root_module = module,
     });
-    return test_exe;
+
+    if (source.sub_programs) |sub_programs| {
+        const container = b.addWriteFiles();
+        for (sub_programs) |program| {
+            const sub_test_exe = compileTest(b, config, program, flags);
+
+            _ = container.addCopyFile(sub_test_exe.getEmittedBin(), program);
+        }
+
+        if (source.input_file) |input_file| _ = container.addCopyFile(
+            config.upstream.path(b.fmt("{s}/{s}", .{ sub_dir, input_file })),
+            input_file,
+        );
+
+        const test_exe_file = container.addCopyFile(test_exe.getEmittedBin(), name);
+        return test_exe_file;
+    }
+
+    return test_exe.getEmittedBin();
 }
 
 fn compileTest(
@@ -246,11 +264,23 @@ fn compileTest(
     const glib = config.deps.get(.glib);
     module.linkLibrary(glib);
 
+    // TODO: this is only required for `spawn-path-search` test so having it
+    // here feels inaffecient find a way around it
+    const name_ = blk: {
+        _, const after = std.mem.cut(u8, name, "/") orelse break :blk name;
+        break :blk after;
+    };
+
     const test_exe = b.addExecutable(.{
-        .name = name,
+        .name = name_,
         .root_module = module,
     });
     return test_exe;
+}
+
+fn createRun(b: *std.Build, name: []const u8) *Step.Run {
+    const run_test = Step.Run.create(b, b.fmt("run {s}", .{name}));
+    return run_test;
 }
 
 const String = []const u8;
@@ -363,6 +393,7 @@ const tests = struct {
         String,
         []const String,
     } = &.{
+        .{ "autoptr", &.{"keyfiletest.ini"} },
         .{ "bookmarkfile", &.{"bookmarks/"} },
         .{ "fileutils", &.{"4096-random-bytes"} },
         .{ "io-channel", &.{"iochannel-test-infile"} },
@@ -386,7 +417,9 @@ const tests = struct {
         source: String,
         c_args: ?String,
         sanitize: ?std.zig.SanitizeC,
-        deps: []const root.Dependencies,
+        deps: ?[]const root.Dependencies,
+        sub_programs: ?[]const String,
+        input_file: ?String,
     };
     const sources: []const struct { String, SourceInfo } = &.{
         .{
@@ -395,7 +428,22 @@ const tests = struct {
                 .source = "gwakeuptest.c",
                 .c_args = null,
                 .sanitize = null,
-                .deps = &.{.glib},
+                .deps = null,
+                .sub_programs = null,
+                .input_file = null,
+            },
+        },
+        .{
+            // FIXME: needs HAVE_EVENTFD which isn't supported on darwin,
+            // openbsd or mingw
+            "gwakeup-fallback",
+            .{
+                .source = "gwakeuptest.c",
+                .c_args = "-DTEST_EVENTFD_FALLBACK",
+                .sanitize = null,
+                .deps = null,
+                .sub_programs = null,
+                .input_file = null,
             },
         },
         .{
@@ -407,6 +455,8 @@ const tests = struct {
                 // .define = "PCRE2_STATIC",
                 .c_args = null,
                 .deps = &.{ .glib, .pcre2 },
+                .sub_programs = null,
+                .input_file = null,
             },
         },
         .{
@@ -415,7 +465,9 @@ const tests = struct {
                 .source = "overflow.c",
                 .sanitize = null,
                 .c_args = "-D_GLIB_TEST_OVERFLOW_FALLBACK",
-                .deps = &.{.glib},
+                .deps = null,
+                .sub_programs = null,
+                .input_file = null,
             },
         },
         .{
@@ -424,7 +476,9 @@ const tests = struct {
                 .source = "refcount.c",
                 .sanitize = null,
                 .c_args = "-DG_DISABLE_CHECKS",
-                .deps = &.{.glib},
+                .deps = null,
+                .sub_programs = null,
+                .input_file = null,
             },
         },
         .{
@@ -433,7 +487,9 @@ const tests = struct {
                 .source = "1bit-mutex.c",
                 .sanitize = null,
                 .c_args = "-DTEST_EMULATED_FUTEX",
-                .deps = &.{.glib},
+                .deps = null,
+                .sub_programs = null,
+                .input_file = null,
             },
         },
         .{
@@ -442,7 +498,9 @@ const tests = struct {
                 .source = "642026.c",
                 .sanitize = null,
                 .c_args = "-DG_ERRORCHECK_MUTEXES",
-                .deps = &.{.glib},
+                .deps = null,
+                .sub_programs = null,
+                .input_file = null,
             },
         },
         .{
@@ -451,7 +509,82 @@ const tests = struct {
                 .source = "bitlock.c",
                 .sanitize = .off,
                 .c_args = null,
-                .deps = &.{.glib},
+                .deps = null,
+                .sub_programs = null,
+                .input_file = null,
+            },
+        },
+        .{
+            // TODO: can potentially fail on windows check it out
+            "spawn-multithreaded",
+            .{
+                .source = "spawn-multithreaded.c",
+                .sanitize = .off,
+                .c_args = null,
+                .deps = null,
+                .sub_programs = &.{
+                    "test-spawn-echo",
+                    "test-spawn-sleep",
+                },
+                .input_file = null,
+            },
+        },
+        .{
+            "spawn-path-search",
+            .{
+                .source = "spawn-path-search.c",
+                .sanitize = .off,
+                .c_args = null,
+                .deps = null,
+                .input_file = null,
+                .sub_programs = &.{
+                    "spawn-path-search-helper",
+                    "spawn-test-helper",
+                    "path-test-subdir/spawn-test-helper",
+                },
+            },
+        },
+        .{
+            // TODO: can posibly fail on glibc verify this
+            "spawn-singlethread",
+            .{
+                .source = "spawn-singlethread.c",
+                .sanitize = .off,
+                .c_args = null,
+                .deps = null,
+                .sub_programs = &.{
+                    "test-spawn-echo",
+                },
+                .input_file = "echo-script",
+            },
+        },
+        .{
+            // TODO: can posibly fail on glibc verify this
+            "spawn-test",
+            .{
+                .source = "spawn-test.c",
+                .sanitize = .off,
+                .c_args = null,
+                .deps = null,
+                .sub_programs = null,
+                // TODO: below is required for windows
+                // &.{
+                // "spawn-test-win32-gui",
+                // },
+                .input_file = null,
+            },
+        },
+        .{
+            "testing",
+            .{
+                .source = "testing.c",
+                .sanitize = .off,
+                .c_args = "",
+                .deps = null,
+                .sub_programs = &.{
+                    "testing-helper",
+                },
+                .input_file = null,
             },
         },
     };

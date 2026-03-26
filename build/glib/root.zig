@@ -139,7 +139,12 @@ pub fn build(b: *std.Build, config: Config) !void {
     dep_map.set(.glib, glib);
     dep_map.set(.pcre2, pcre2.lib);
 
+    var abs_build_root: [128]u8 = undefined;
+    const size = b.build_root.handle.realPath(b.graph.io, &abs_build_root) catch unreachable;
+    abs_build_root[size] = '/';
+
     try tests.build(b, .{
+        .build_root = abs_build_root[0 .. size + 1],
         .deps = &dep_map,
         .upstream = upstream,
         .target = target,

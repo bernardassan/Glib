@@ -461,7 +461,7 @@ pub fn build(b: *std.Build) !void {
         },
         .EXEEXT = switch (rt.os.tag) {
             .windows => quote(".exe"),
-            else => null,
+            else => "",
         },
         .MAJOR_IN_TYPES = if (is(&rt, &.{ .darwin, .freebsd, .openbsd, .netbsd })) true else null,
         // the clang bundled with Zig version `build_zon.minimum_zig_version`
