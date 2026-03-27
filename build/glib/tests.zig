@@ -207,8 +207,12 @@ fn compileSourceTest(
     defer if (source.c_args) |_| {
         _ = flags.pop();
     };
-    module.addCSourceFile(.{
-        .file = config.upstream.path(b.fmt("{s}/{s}", .{ sub_dir, source.source })),
+    if (source.source) |src| module.addCSourceFile(.{
+        .file = config.upstream.path(b.fmt("{s}/{s}", .{ sub_dir, src })),
+        .language = .c,
+        .flags = flags.items,
+    }) else module.addCSourceFile(.{
+        .file = config.upstream.path(b.fmt("{s}/{s}.c", .{ sub_dir, name })),
         .language = .c,
         .flags = flags.items,
     });
@@ -421,25 +425,19 @@ const tests = struct {
     };
 
     const SourceInfo = struct {
-        source: String,
-        c_args: ?String,
-        sanitize: ?std.zig.SanitizeC,
-        deps: ?[]const root.Dependencies,
-        sub_programs: ?[]const String,
-        input_file: ?String,
-        skip: ?[]const Platform,
+        source: ?String = null,
+        c_args: ?String = null,
+        sanitize: ?std.zig.SanitizeC = null,
+        deps: ?[]const root.Dependencies = null,
+        sub_programs: ?[]const String = null,
+        input_file: ?String = null,
+        skip: ?[]const Platform = null,
     };
     const sources: []const struct { String, SourceInfo } = &.{
         .{
             "gwakeup",
             .{
                 .source = "gwakeuptest.c",
-                .c_args = null,
-                .sanitize = null,
-                .deps = null,
-                .sub_programs = null,
-                .input_file = null,
-                .skip = null,
             },
         },
         .{
@@ -447,10 +445,6 @@ const tests = struct {
             .{
                 .source = "gwakeuptest.c",
                 .c_args = "-DTEST_EVENTFD_FALLBACK",
-                .sanitize = null,
-                .deps = null,
-                .sub_programs = null,
-                .input_file = null,
                 // these platforms don't have `eventfd`
                 .skip = &.{ .darwin, .openbsd, .mingw },
             },
@@ -458,115 +452,69 @@ const tests = struct {
         .{
             "regex",
             .{
-                .source = "regex.c",
-                .sanitize = null,
                 // TODO: only add in static build and check if any issues without it
                 // .define = "PCRE2_STATIC",
                 .c_args = null,
                 .deps = &.{ .glib, .pcre2 },
-                .sub_programs = null,
-                .input_file = null,
-                .skip = null,
             },
         },
         .{
             "overflow-fallback",
             .{
                 .source = "overflow.c",
-                .sanitize = null,
                 .c_args = "-D_GLIB_TEST_OVERFLOW_FALLBACK",
-                .deps = null,
-                .sub_programs = null,
-                .input_file = null,
-                .skip = null,
             },
         },
         .{
             "refcount-macro",
             .{
                 .source = "refcount.c",
-                .sanitize = null,
                 .c_args = "-DG_DISABLE_CHECKS",
-                .deps = null,
-                .sub_programs = null,
-                .input_file = null,
-                .skip = null,
             },
         },
         .{
             "1bit-emufutex",
             .{
                 .source = "1bit-mutex.c",
-                .sanitize = null,
                 .c_args = "-DTEST_EMULATED_FUTEX",
-                .deps = null,
-                .sub_programs = null,
-                .input_file = null,
-                .skip = null,
             },
         },
         .{
             "642026-ec",
             .{
                 .source = "642026.c",
-                .sanitize = null,
                 .c_args = "-DG_ERRORCHECK_MUTEXES",
-                .deps = null,
-                .sub_programs = null,
-                .input_file = null,
-                .skip = null,
             },
         },
         .{
             "bitlock",
             .{
-                .source = "bitlock.c",
                 .sanitize = .off,
-                .c_args = null,
-                .deps = null,
-                .sub_programs = null,
-                .input_file = null,
-                .skip = null,
             },
         },
         .{
             "spawn-multithreaded",
             .{
-                .source = "spawn-multithreaded.c",
-                .sanitize = null,
-                .c_args = null,
-                .deps = null,
                 .sub_programs = &.{
                     "test-spawn-echo",
                     "test-spawn-sleep",
                 },
-                .input_file = null,
                 .skip = &.{.mingw},
             },
         },
         .{
             "spawn-path-search",
             .{
-                .source = "spawn-path-search.c",
-                .sanitize = null,
-                .c_args = null,
-                .deps = null,
-                .input_file = null,
                 .sub_programs = &.{
                     "spawn-path-search-helper",
                     "spawn-test-helper",
                     "path-test-subdir/spawn-test-helper",
                 },
-                .skip = null,
             },
         },
         .{
             "spawn-singlethread",
             .{
-                .source = "spawn-singlethread.c",
-                .sanitize = null,
-                .c_args = null,
-                .deps = null,
                 .sub_programs = &.{
                     "test-spawn-echo",
                 },
@@ -578,8 +526,6 @@ const tests = struct {
             "spawn-singlethread-win",
             .{
                 .source = "spawn-singlethread.c",
-                .sanitize = null,
-                .c_args = null,
                 .deps = &.{.ws2_32},
                 .sub_programs = &.{
                     "test-spawn-echo",
@@ -592,87 +538,50 @@ const tests = struct {
             "spawn-test-win",
             .{
                 .source = "spawn-test.c",
-                .sanitize = null,
-                .c_args = null,
-                .deps = null,
                 .sub_programs = &.{
                     "spawn-test-win32-gui",
                 },
-                .input_file = null,
                 .skip = &.{.unix},
             },
         },
         .{
             "testing",
             .{
-                .source = "testing.c",
-                .sanitize = null,
-                .c_args = "",
-                .deps = null,
                 .sub_programs = &.{
                     "testing-helper",
                 },
-                .input_file = null,
-                .skip = null,
             },
         },
         .{
             "gpoll",
             .{
-                .source = "gpoll.c",
-                .c_args = null,
-                .sanitize = null,
                 .deps = &.{ .glib, .ws2_32 },
-                .sub_programs = null,
-                .input_file = null,
                 .skip = &.{.unix},
             },
         },
         .{
             "win32",
             .{
-                .source = "win32.c",
-                .c_args = null,
-                .sanitize = null,
                 .deps = &.{ .glib, .windowscodecs },
-                .sub_programs = null,
-                .input_file = null,
                 .skip = &.{.unix},
             },
         },
         .{
             "win32-private",
             .{
-                .source = "win32-private.c",
-                .c_args = null,
-                .sanitize = null,
                 .deps = &.{ .glib, .ws2_32 },
-                .sub_programs = null,
-                .input_file = null,
                 .skip = &.{.unix},
             },
         },
         .{
             "include",
             .{
-                .source = "include.c",
-                .c_args = null,
-                .sanitize = null,
-                .deps = null,
-                .sub_programs = null,
-                .input_file = null,
                 .skip = &.{.mingw},
             },
         },
         .{
             "unix",
             .{
-                .source = "unix.c",
-                .c_args = null,
-                .sanitize = null,
-                .deps = null,
-                .sub_programs = null,
-                .input_file = null,
                 .skip = &.{.mingw},
             },
         },
