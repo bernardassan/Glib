@@ -28,15 +28,15 @@ pub const headers = struct {
             const define = headers.toDefine(b, header);
             glib_conf.addValue(define, bool, true);
         };
-        if (rt.os.tag != .windows) for (headers.unix) |header| {
+        if (is(rt, &.{.unix})) for (headers.unix) |header| {
             const define = headers.toDefine(b, header);
             glib_conf.addValue(define, bool, true);
         };
-        if (rt.isMinGW()) for (headers.mingw) |header| {
+        if (is(rt, &.{.mingw})) for (headers.mingw) |header| {
             const define = headers.toDefine(b, header);
             glib_conf.addValue(define, bool, true);
         };
-        if (rt.isMuslLibC() or rt.isGnuLibC()) for (headers.musl_glibc) |header| {
+        if (is(rt, &.{ .musl, .gnu })) for (headers.musl_glibc) |header| {
             const define = headers.toDefine(b, header);
             glib_conf.addValue(define, bool, true);
         };
@@ -50,7 +50,7 @@ pub const headers = struct {
                 const define = headers.toDefine(b, header);
                 glib_conf.addValue(define, bool, true);
             };
-        if (rt.isDarwinLibC()) for (headers.darwin) |header| {
+        if (is(rt, &.{.darwin})) for (headers.darwin) |header| {
             const define = headers.toDefine(b, header);
             glib_conf.addValue(define, bool, true);
         };
@@ -59,7 +59,7 @@ pub const headers = struct {
                 const define = headers.toDefine(b, header);
                 glib_conf.addValue(define, bool, true);
             };
-        if (rt.isDarwinLibC() or rt.isFreeBSDLibC()) for (headers.darwin_freebsd) |header| {
+        if (is(rt, &.{ .darwin, .freebsd })) for (headers.darwin_freebsd) |header| {
             const define = headers.toDefine(b, header);
             glib_conf.addValue(define, bool, true);
         };
@@ -68,7 +68,7 @@ pub const headers = struct {
                 const define = headers.toDefine(b, header);
                 glib_conf.addValue(define, bool, true);
             };
-        if (rt.isFreeBSDLibC()) for (headers.freebsd) |header| {
+        if (is(rt, &.{.freebsd})) for (headers.freebsd) |header| {
             const define = headers.toDefine(b, header);
             glib_conf.addValue(define, bool, true);
         };
@@ -191,7 +191,7 @@ pub const struct_members = struct {
             const define = struct_members.toDefine(b, member);
             glib_conf.addValue(define, @TypeOf(null), null);
         }
-        if (rt.os.tag != .windows) for (struct_members.unix) |member| {
+        if (is(rt, &.{.unix})) for (struct_members.unix) |member| {
             const define = struct_members.toDefine(b, member);
             glib_conf.addValue(define, bool, true);
         };
@@ -205,11 +205,11 @@ pub const struct_members = struct {
                 const define = struct_members.toDefine(b, member);
                 glib_conf.addValue(define, bool, true);
             };
-        if (rt.isFreeBSDLibC()) for (struct_members.free_bsd) |member| {
+        if (is(rt, &.{.freebsd})) for (struct_members.free_bsd) |member| {
             const define = struct_members.toDefine(b, member);
             glib_conf.addValue(define, bool, true);
         };
-        if (rt.isFreeBSDLibC() or rt.isNetBSDLibC()) for (struct_members.free_net_bsd) |member| {
+        if (is(rt, &.{ .freebsd, .netbsd })) for (struct_members.free_net_bsd) |member| {
             const define = struct_members.toDefine(b, member);
             glib_conf.addValue(define, bool, true);
         };
@@ -218,11 +218,11 @@ pub const struct_members = struct {
                 const define = struct_members.toDefine(b, member);
                 glib_conf.addValue(define, bool, true);
             };
-        if (rt.isMuslLibC()) for (struct_members.musl) |member| {
+        if (is(rt, &.{.musl})) for (struct_members.musl) |member| {
             const define = struct_members.toDefine(b, member);
             glib_conf.addValue(define, bool, true);
         };
-        if (rt.isMuslLibC() or rt.isGnuLibC()) for (struct_members.musl_glibc) |member| {
+        if (is(rt, &.{ .musl, .gnu })) for (struct_members.musl_glibc) |member| {
             const define = struct_members.toDefine(b, member);
             glib_conf.addValue(define, bool, true);
         };
@@ -231,16 +231,17 @@ pub const struct_members = struct {
                 const define = struct_members.toDefine(b, member);
                 glib_conf.addValue(define, bool, true);
             };
-        if (rt.isMuslLibC() or rt.isGnuLibC() or rt.isDarwinLibC() or rt.isNetBSDLibC() or rt.isOpenBSDLibC() or rt.isFreeBSDLibC())
+        if (is(rt, &.{ .musl, .gnu, .darwin, .netbsd, .openbsd, .freebsd }))
             for (struct_members.musl_glibc_darwin_all_bsd) |member| {
                 const define = struct_members.toDefine(b, member);
                 glib_conf.addValue(define, bool, true);
             };
-        if (rt.isMuslLibC() or rt.isGnuLibC() or rt.isDarwinLibC() or rt.isFreeBSDLibC() or rt.isOpenBSDLibC()) for (struct_members.musl_glibc_darwin_free_open_bsd) |member| {
-            const define = struct_members.toDefine(b, member);
-            glib_conf.addValue(define, bool, true);
-        };
-        if (rt.isNetBSDLibC()) for (struct_members.net_bsd) |member| {
+        if (is(rt, &.{ .musl, .gnu, .darwin, .freebsd, .openbsd }))
+            for (struct_members.musl_glibc_darwin_free_open_bsd) |member| {
+                const define = struct_members.toDefine(b, member);
+                glib_conf.addValue(define, bool, true);
+            };
+        if (is(rt, &.{.netbsd})) for (struct_members.net_bsd) |member| {
             const define = struct_members.toDefine(b, member);
             glib_conf.addValue(define, bool, true);
         };
@@ -325,11 +326,11 @@ pub const functions = struct {
             const define = functions.toDefine(b, function);
             glib_conf.addValue(define, @TypeOf(null), null);
         }
-        if (rt.os.tag != .windows) for (functions.unix) |function| {
+        if (is(rt, &.{.unix})) for (functions.unix) |function| {
             const define = functions.toDefine(b, function);
             glib_conf.addValue(define, bool, true);
         };
-        if (rt.isMinGW()) for (functions.mingw) |function| {
+        if (is(rt, &.{.mingw})) for (functions.mingw) |function| {
             const define = functions.toDefine(b, function);
             glib_conf.addValue(define, bool, true);
         };
@@ -338,7 +339,7 @@ pub const functions = struct {
                 const define = functions.toDefine(b, function);
                 glib_conf.addValue(define, bool, true);
             };
-        if (rt.isMuslLibC() or rt.isGnuLibC()) for (functions.musl_glibc) |function| {
+        if (is(rt, &.{ .musl, .gnu })) for (functions.musl_glibc) |function| {
             const define = functions.toDefine(b, function);
             glib_conf.addValue(define, bool, true);
         };
@@ -372,7 +373,7 @@ pub const functions = struct {
                 const define = functions.toDefine(b, function);
                 glib_conf.addValue(define, bool, true);
             };
-        if (rt.isDarwinLibC()) for (functions.darwin) |function| {
+        if (is(rt, &.{.darwin})) for (functions.darwin) |function| {
             const define = functions.toDefine(b, function);
             glib_conf.addValue(define, bool, true);
         };
@@ -391,7 +392,7 @@ pub const functions = struct {
                 const define = functions.toDefine(b, function);
                 glib_conf.addValue(define, bool, true);
             };
-        if (rt.isGnuLibC()) for (functions.glibc) |function| {
+        if (is(rt, &.{.gnu})) for (functions.glibc) |function| {
             const define = functions.toDefine(b, function);
             glib_conf.addValue(define, bool, true);
         };
@@ -405,21 +406,18 @@ pub const functions = struct {
                 const define = functions.toDefine(b, function);
                 glib_conf.addValue(define, bool, true);
             };
-        if (is(rt, &.{ .gnu, .freebsd }))
-            for (functions.glibc_freebsd) |function| {
-                const define = functions.toDefine(b, function);
-                glib_conf.addValue(define, bool, true);
-            };
-        if (is(rt, &.{ .gnu, .mingw }))
-            for (functions.glibc_mingw) |function| {
-                const define = functions.toDefine(b, function);
-                glib_conf.addValue(define, bool, true);
-            };
-        if (rt.isNetBSDLibC())
-            for (functions.netbsd) |function| {
-                const define = functions.toDefine(b, function);
-                glib_conf.addValue(define, bool, true);
-            };
+        if (is(rt, &.{ .gnu, .freebsd })) for (functions.glibc_freebsd) |function| {
+            const define = functions.toDefine(b, function);
+            glib_conf.addValue(define, bool, true);
+        };
+        if (is(rt, &.{ .gnu, .mingw })) for (functions.glibc_mingw) |function| {
+            const define = functions.toDefine(b, function);
+            glib_conf.addValue(define, bool, true);
+        };
+        if (is(rt, &.{.netbsd})) for (functions.netbsd) |function| {
+            const define = functions.toDefine(b, function);
+            glib_conf.addValue(define, bool, true);
+        };
     }
 
     pub const mingw: []const []const u8 = &.{

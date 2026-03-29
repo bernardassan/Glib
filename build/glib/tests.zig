@@ -237,7 +237,6 @@ fn compileSourceTest(
         const container = b.addWriteFiles();
         for (sub_programs) |program| {
             const sub_test_exe = compileTest(b, config, program, flags);
-
             _ = container.addCopyFile(sub_test_exe.getEmittedBin(), program);
         }
 
@@ -275,7 +274,7 @@ fn compileTest(
     module.linkLibrary(glib.local);
 
     // TODO: this is only required for `spawn-path-search` test so having it
-    // here feels inaffecient find a way around it
+    // here feels inefficient find a way around it
     const name_ = blk: {
         _, const after = std.mem.cut(u8, name, "/") orelse break :blk name;
         break :blk after;
