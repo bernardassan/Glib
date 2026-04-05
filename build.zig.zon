@@ -14,8 +14,8 @@
             .hash = "N-V-__8AAKU0KQMunLzRshZbm1ufWgzgRURt7GbK_vUGaaEO",
         },
         .pcre2 = .{
-            .url = "https://github.com/bernardassan/pcre2/archive/161bed58493d213807b438cdfa6a7c59799ee031.tar.gz",
-            .hash = "N-V-__8AAMIr4wAK_RXmm7e3YuZb7m1SkUTtnUJMpS81TDt3",
+            .url = "https://github.com/PCRE2Project/pcre2/archive/ac0eb7122a0ac04d6717585f132d82aec3adc8d3.tar.gz",
+            .hash = "N-V-__8AAPkv4wCl0613Oz5TTNo6UrMK9cKf__7ge-kn4Onj",
         },
     },
 }
