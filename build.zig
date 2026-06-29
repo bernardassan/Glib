@@ -117,16 +117,16 @@ pub fn build(b: *std.Build) !void {
     default_options.addOption(Cstd, "c_std", .c11);
     default_options.addOption(bool, "have_dlopen_dlsym", rt.os.tag != .windows);
 
-    const glib_prefix = b.install_path;
-    const glib_bindir = b.exe_dir;
+    const glib_prefix: []const u8 = b.root.joinString(b.allocator, "zig-out") catch unreachable;
+    const glib_bindir: []const u8 = b.fmt("{s}/bin", .{glib_prefix});
     _ = glib_bindir; // autofix
-    const glib_libdir = b.lib_dir;
+    const glib_libdir: []const u8 = b.fmt("{s}/lib", .{glib_prefix});
     const gio_module_dir = b.option(
         []const u8,
         "gio_module_dir",
         b.fmt("load gio modules from this directory (default to '${[libdir]s}/gio/modules' if unset)", .{ .libdir = glib_libdir }),
     );
-    const includedir = b.h_dir;
+    const includedir = b.fmt("{s}/include", .{glib_prefix});
     const libexecdir = b.pathJoin(&.{ glib_libdir, "libexec" });
     const datadir = b.pathJoin(&.{ glib_prefix, "share" });
     const glib_localedir = b.pathJoin(&.{ glib_prefix, "share/locale" });

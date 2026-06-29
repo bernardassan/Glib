@@ -149,7 +149,7 @@ pub fn build(b: *std.Build, config: Config) !void {
     dep_map.set(.windowscodecs, .{ .system = "windowscodecs" });
 
     var abs_build_root: [128]u8 = undefined;
-    const size = b.build_root.handle.realPath(b.graph.io, &abs_build_root) catch unreachable;
+    const size = b.root.root_dir.handle.realPath(b.graph.io, &abs_build_root) catch unreachable;
     abs_build_root[size] = '/';
 
     try tests.build(b, .{
